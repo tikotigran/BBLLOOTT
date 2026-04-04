@@ -4,7 +4,34 @@ import { createDeck, detectCombos, calculateRoundScore, canPlayCard, resolveTric
 import { compareCards, getCardValue } from './constants';
 import Card from './components/Card';
 import { motion, AnimatePresence } from 'motion/react';
-import { Trophy, RotateCcw, Lock, Layers, Slash, ZapOff, ChevronUp, ArrowRight, X } from 'lucide-react';
+import { 
+  Trophy, 
+  RotateCcw, 
+  Lock, 
+  Layers, 
+  Slash, 
+  ZapOff, 
+  ChevronUp, 
+  ArrowRight, 
+  X,
+  Menu,
+  Settings,
+  HelpCircle,
+  LogOut,
+  User,
+  Play,
+  Plus,
+  Users,
+  History,
+  Shield,
+  Zap,
+  Clock,
+  MessageSquare,
+  Volume2,
+  VolumeX,
+  Maximize2,
+  Minimize2
+} from 'lucide-react';
 
 const INITIAL_STATE: GameState = {
   playerHand: [],
@@ -57,7 +84,7 @@ const CircularTimer = ({ timeLeft, isActive, maxTime, timeBank, isTimeBankActive
   }, [isActive, isTimeBankActive]);
 
   const percentage = isTimeBankActive ? (timeBank / 180) * 100 : (timeLeft / maxTime) * 100;
-  const radius = 42;
+  const radius = 46;
   const circumference = 2 * Math.PI * radius;
   const offset = circumference - (percentage / 100) * circumference;
   const color = isTimeBankActive ? '#ef4444' : '#22c55e';
@@ -71,7 +98,7 @@ const CircularTimer = ({ timeLeft, isActive, maxTime, timeBank, isTimeBankActive
   };
 
   return (
-    <div className="absolute -inset-2 z-10 pointer-events-none flex items-center justify-center group">
+    <div className="absolute inset-0 z-10 pointer-events-none flex items-center justify-center group">
       <AnimatePresence>
         {showLimit && !isTimeBankActive && (
           <motion.div 
@@ -95,21 +122,21 @@ const CircularTimer = ({ timeLeft, isActive, maxTime, timeBank, isTimeBankActive
           </motion.div>
         )}
       </AnimatePresence>
-      <svg className="w-24 h-24 transform -rotate-90">
+      <svg className="w-full h-full transform -rotate-90 overflow-visible" viewBox="0 0 100 100">
         <circle
-          cx="48"
-          cy="48"
+          cx="50"
+          cy="50"
           r={radius}
           stroke="rgba(255,255,255,0.1)"
-          strokeWidth="3"
+          strokeWidth="4"
           fill="transparent"
         />
         <motion.circle
-          cx="48"
-          cy="48"
+          cx="50"
+          cy="50"
           r={radius}
           stroke={color}
-          strokeWidth="3"
+          strokeWidth="4"
           fill="transparent"
           strokeDasharray={circumference}
           initial={{ strokeDashoffset: circumference }}
@@ -220,6 +247,15 @@ export default function App() {
     }, 3000);
     */
   };
+
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const checkMobile = () => setIsMobile(window.innerWidth < 900);
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   const startNewRound = useCallback(() => {
     setVisibleCombos({ player: false, ai: false });
@@ -1291,13 +1327,60 @@ export default function App() {
 
   return (
     <div className="relative w-full h-[100dvh] overflow-hidden bg-[#1a1c23] text-white font-sans">
+      {/* Mobile Top Header */}
+      <div className="hidden max-[900px]:flex absolute top-0 left-0 w-full h-12 bg-[#1a1c23] border-b border-white/5 z-[100] items-center px-4 justify-between">
+        <div className="flex items-center gap-4">
+          <Menu size={20} className="text-white/60" />
+          <div className="flex flex-col">
+            <span className="text-[8px] text-white/40 uppercase font-black leading-none tracking-widest">Balance</span>
+            <span className="text-xs font-black text-green-400">1,250.00 AMD</span>
+          </div>
+        </div>
+        <div className="flex flex-col items-end">
+          <span className="text-[8px] text-white/40 uppercase font-black leading-none tracking-widest">Bet</span>
+          <span className="text-xs font-black text-yellow-500">100.00</span>
+        </div>
+      </div>
+
+      <AnimatePresence>
+        {state.announcedCombos.ai.length > 0 && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.5, x: -20 }}
+            animate={{ opacity: 1, scale: 1, x: 0 }}
+            exit={{ opacity: 0, scale: 0.5 }}
+            className="absolute top-[16%] left-20 max-[900px]:left-16 z-50 bg-white text-black px-3 py-2 rounded-2xl rounded-bl-none shadow-xl border border-black/5 flex items-center gap-2"
+          >
+            <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+            <span className="text-[10px] font-black uppercase tracking-widest whitespace-nowrap">
+              {state.announcedCombos.ai.map(c => c.type).join(' + ')}
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {state.announcedCombos.player.length > 0 && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.5, x: -20 }}
+            animate={{ opacity: 1, scale: 1, x: 0 }}
+            exit={{ opacity: 0, scale: 0.5 }}
+            className="absolute bottom-[16%] left-20 max-[900px]:left-16 z-50 bg-green-500 text-white px-3 py-2 rounded-2xl rounded-tl-none shadow-xl border border-white/10 flex items-center gap-2"
+          >
+            <div className="w-2 h-2 bg-white rounded-full animate-pulse" />
+            <span className="text-[10px] font-black uppercase tracking-widest whitespace-nowrap">
+              {state.announcedCombos.player.map(c => c.type).join(' + ')}
+            </span>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Full Screen Game Table */}
-      <div className="relative w-full h-full flex flex-col items-center justify-center overflow-hidden">
+      <div className="relative w-full h-full flex flex-col items-center justify-center overflow-hidden max-[900px]:pt-12">
         {/* Background Gradient */}
-        <div className="absolute inset-0 bg-[#1a1c23]" />
+        <div className="absolute inset-0 bg-gradient-to-b from-[#3a4152] to-[#242936]" />
         
-        {/* Scoreboard (Bottom Right) */}
-        <div className="absolute bottom-6 right-6 z-50 flex flex-col gap-0 min-w-[220px] bg-[#242936] border border-white/5 rounded-xl shadow-2xl overflow-hidden">
+        {/* Scoreboard (Bottom Right) - Hidden on Mobile */}
+        <div className="absolute bottom-6 right-6 z-50 flex flex-col gap-0 min-w-[220px] bg-[#242936] border border-white/5 rounded-xl shadow-2xl overflow-hidden max-[900px]:hidden">
           {/* Table Info Header */}
           <div className="px-4 py-2 bg-black/20 border-b border-white/5 flex justify-between items-center">
             <span className="text-[10px] font-black text-white/40 uppercase tracking-widest">Table ID: {state.tableId}</span>
@@ -1315,8 +1398,6 @@ export default function App() {
               <div className="text-2xl font-black text-vivaro-pink tabular-nums">{state.aiScore}</div>
             </div>
           </div>
-          
-          {/* Round Info Footer Removed for Clean UI */}
         </div>
 
         {/* Exit Button (Top Right) */}
@@ -1328,14 +1409,12 @@ export default function App() {
             Exit
           </button>
         </div>
-        
-        {/* Notifications removed for Clean UI */}
 
-
-        {/* AI Avatar (Left Top) */}
-        <div className="absolute top-8 left-8 z-20 flex items-center gap-4">
-          <div className="flex flex-col items-center gap-2">
-            <div className="relative">
+        {/* Mobile Sidebar (Left) */}
+        <div className="max-[900px]:block hidden">
+          {/* AI Avatar (Left Top) */}
+          <div className="absolute top-12 left-[15px] z-20 flex flex-col items-center gap-2 mt-[15px]">
+            <div className="relative w-20 h-20 flex items-center justify-center">
               <CircularTimer 
                 timeLeft={state.timeLeft} 
                 isActive={state.turn === 'ai' && (state.phase === 'PLAYING' || state.phase === 'OFFERING_TRUMP' || state.phase === 'SUIT_SELECTION') && !state.currentTrick.ai} 
@@ -1343,16 +1422,18 @@ export default function App() {
                 timeBank={state.aiTimeBank}
                 isTimeBankActive={state.timeLeft === 0}
               />
-              <div className="w-20 h-20 rounded-full bg-zinc-800 flex items-center justify-center overflow-hidden shadow-2xl">
+              <div className="w-16 h-16 rounded-full bg-zinc-800 flex items-center justify-center overflow-hidden shadow-2xl border-2 border-white/20">
                 <img src="https://picsum.photos/seed/ai/100/100" alt="AI" referrerPolicy="no-referrer" className="opacity-80 grayscale w-full h-full object-cover" />
               </div>
+              {/* Dealer Icon */}
               {state.dealer === 'ai' && (
-                <div className="absolute -bottom-1 -left-1 w-6 h-6 bg-yellow-500 rounded-full flex items-center justify-center border border-black text-[10px] font-black text-black shadow-lg z-30">
+                <div className="absolute bottom-1 left-1 w-6 h-6 bg-yellow-500 rounded-full flex items-center justify-center border border-black text-[10px] font-black text-black shadow-lg z-30">
                   D
                 </div>
               )}
+              {/* Trump Icon */}
               {state.trump && state.bidder === 'ai' && (
-                <div className="absolute -top-1 -right-1 w-6 h-6 bg-white rounded-full flex items-center justify-center border-[0.5px] border-[#ccc] shadow-lg z-30">
+                <div className="absolute top-1 right-1 w-7 h-7 bg-white rounded-full flex items-center justify-center border-[0.5px] border-[#ccc] shadow-lg z-30">
                   <span className={`text-sm leading-none font-bold ${state.trump === TrumpType.HEARTS || state.trump === TrumpType.DIAMONDS ? 'text-red-500' : 'text-black'}`}>
                     {state.trump === TrumpType.HEARTS ? '♥' : 
                      state.trump === TrumpType.DIAMONDS ? '♦' : 
@@ -1363,44 +1444,93 @@ export default function App() {
                 </div>
               )}
             </div>
-            <div className="bg-[#242936] px-3 py-1.5 rounded-lg border border-white/5 shadow-lg min-w-[100px] text-center">
-              <span className="text-[9px] font-bold uppercase tracking-widest text-white/40">ID: 88294</span>
-            </div>
-          </div>
-        </div>
 
-        {/* Player Avatar (Left Bottom) */}
-        <div className="absolute bottom-8 left-8 z-20 flex flex-col items-center gap-2">
-          <div className="relative">
-            <CircularTimer 
-              timeLeft={state.timeLeft} 
-              isActive={state.turn === 'player' && (state.phase === 'PLAYING' || state.phase === 'OFFERING_TRUMP' || state.phase === 'SUIT_SELECTION') && !state.currentTrick.player} 
-              maxTime={state.turnTimeLimit} 
-              timeBank={state.playerTimeBank}
-              isTimeBankActive={state.timeLeft === 0}
-            />
-            <div className="w-20 h-20 rounded-full bg-zinc-800 flex items-center justify-center overflow-hidden shadow-2xl">
-              <img src="https://picsum.photos/seed/player/100/100" alt="Player" referrerPolicy="no-referrer" className="opacity-80 grayscale w-full h-full object-cover" />
-            </div>
-            {state.dealer === 'player' && (
-              <div className="absolute -bottom-1 -left-1 w-6 h-6 bg-yellow-500 rounded-full flex items-center justify-center border border-black text-[10px] font-black text-black shadow-lg z-30">
-                D
-              </div>
-            )}
-            {state.trump && state.bidder === 'player' && (
-              <div className="absolute -top-1 -right-1 w-6 h-6 bg-white rounded-full flex items-center justify-center border-[0.5px] border-[#ccc] shadow-lg z-30">
-                <span className={`text-sm leading-none font-bold ${state.trump === TrumpType.HEARTS || state.trump === TrumpType.DIAMONDS ? 'text-red-500' : 'text-black'}`}>
-                  {state.trump === TrumpType.HEARTS ? '♥' : 
-                   state.trump === TrumpType.DIAMONDS ? '♦' : 
-                   state.trump === TrumpType.CLUBS ? '♣' : 
-                   state.trump === TrumpType.SPADES ? '♠' : 
-                   state.trump === TrumpType.NO_TRUMP ? 'A' : ''}
-                </span>
-              </div>
-            )}
+            {/* AI Bidding Bubble */}
+            <AnimatePresence>
+              {state.announcedCombos.ai.length > 0 && (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.5, x: -20 }}
+                  animate={{ opacity: 1, scale: 1, x: 0 }}
+                  exit={{ opacity: 0, scale: 0.5 }}
+                  className="relative bg-green-500 text-white px-3 py-2 rounded-xl shadow-xl flex items-center gap-2"
+                >
+                  <span className="text-[10px] font-black uppercase tracking-widest whitespace-nowrap">
+                    {state.announcedCombos.ai.map(c => c.type).join(' + ')}
+                  </span>
+                  <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-2 h-2 bg-green-500 rotate-45" />
+                  <div className="w-3 h-3 bg-white rounded-full flex items-center justify-center">
+                    <span className="text-green-500 text-[8px]">✓</span>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
           </div>
-          <div className="bg-[#242936] px-3 py-1.5 rounded-lg border border-white/5 shadow-lg min-w-[100px] text-center">
-            <span className="text-[9px] font-bold uppercase tracking-widest text-white/40">ID: 2458007</span>
+
+          {/* Shared Score Block (Center Left) */}
+          <div className="absolute top-1/2 left-[15px] -translate-y-1/2 z-20 flex flex-col items-center py-2 bg-black/20 backdrop-blur-sm rounded-xl border border-white/5 px-3">
+            <span className="text-[8px] font-bold text-white/40 uppercase tracking-widest mb-2">ID: 5488794</span>
+            <div className="flex flex-row gap-[15px] items-center">
+              <div className="flex flex-col items-center">
+                <span className="text-[8px] font-black text-white/40 uppercase">Me</span>
+                <span className="text-lg font-black text-yellow-500 tabular-nums leading-none">{state.playerScore}</span>
+              </div>
+              <div className="w-[1px] h-6 bg-white/10" />
+              <div className="flex flex-col items-center">
+                <span className="text-[8px] font-black text-white/40 uppercase">You</span>
+                <span className="text-lg font-black text-yellow-500 tabular-nums leading-none">{state.aiScore}</span>
+              </div>
+            </div>
+          </div>
+
+          {/* Player Avatar (Left Bottom) */}
+          <div className="absolute bottom-[10%] left-[15px] z-20 flex flex-col items-center gap-2">
+            {/* Player Bidding Bubble */}
+            <AnimatePresence>
+              {state.announcedCombos.player.length > 0 && (
+                <motion.div 
+                  initial={{ opacity: 0, scale: 0.5, x: -20 }}
+                  animate={{ opacity: 1, scale: 1, x: 0 }}
+                  exit={{ opacity: 0, scale: 0.5 }}
+                  className="relative bg-white text-black px-3 py-2 rounded-xl shadow-xl flex items-center gap-2 mb-2"
+                >
+                  <span className="text-[10px] font-black uppercase tracking-widest whitespace-nowrap">
+                    {state.announcedCombos.player.map(c => c.type).join(' + ')}
+                  </span>
+                  <div className="absolute -left-1 top-1/2 -translate-y-1/2 w-2 h-2 bg-white rotate-45" />
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            <div className="relative w-20 h-20 flex items-center justify-center">
+              <CircularTimer 
+                timeLeft={state.timeLeft} 
+                isActive={state.turn === 'player' && (state.phase === 'PLAYING' || state.phase === 'OFFERING_TRUMP' || state.phase === 'SUIT_SELECTION') && !state.currentTrick.player} 
+                maxTime={state.turnTimeLimit} 
+                timeBank={state.playerTimeBank}
+                isTimeBankActive={state.timeLeft === 0}
+              />
+              <div className="w-16 h-16 rounded-full bg-zinc-800 flex items-center justify-center overflow-hidden shadow-2xl border-2 border-white/20">
+                <img src="https://picsum.photos/seed/player/100/100" alt="Player" referrerPolicy="no-referrer" className="opacity-80 grayscale w-full h-full object-cover" />
+              </div>
+              {/* Dealer Icon */}
+              {state.dealer === 'player' && (
+                <div className="absolute bottom-1 left-1 w-6 h-6 bg-yellow-500 rounded-full flex items-center justify-center border border-black text-[10px] font-black text-black shadow-lg z-30">
+                  D
+                </div>
+              )}
+              {/* Trump Icon */}
+              {state.trump && state.bidder === 'player' && (
+                <div className="absolute top-1 right-1 w-7 h-7 bg-white rounded-full flex items-center justify-center border-[0.5px] border-[#ccc] shadow-lg z-30">
+                  <span className={`text-sm leading-none font-bold ${state.trump === TrumpType.HEARTS || state.trump === TrumpType.DIAMONDS ? 'text-red-500' : 'text-black'}`}>
+                    {state.trump === TrumpType.HEARTS ? '♥' : 
+                     state.trump === TrumpType.DIAMONDS ? '♦' : 
+                     state.trump === TrumpType.CLUBS ? '♣' : 
+                     state.trump === TrumpType.SPADES ? '♠' : 
+                     state.trump === TrumpType.NO_TRUMP ? 'A' : ''}
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -1436,15 +1566,15 @@ export default function App() {
         </div>
 
         {/* AI Hand Area (Top) */}
-        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-5xl h-48 flex justify-center items-start z-10">
+        <div className="absolute top-0 left-1/2 -translate-x-1/2 w-full max-w-5xl h-32 flex justify-center items-start z-10">
           <div className="relative w-full flex justify-center">
             {state.aiHand.map((card, index) => {
               const total = state.aiHand.length;
               const centerIndex = (total - 1) / 2;
               const distanceFromCenter = index - centerIndex;
-              const angle = distanceFromCenter * -4; 
-              const xOffset = distanceFromCenter * 35; 
-              const yOffset = -Math.pow(Math.abs(distanceFromCenter), 1.5) * 4;
+              const angle = distanceFromCenter * -8; 
+              const xOffset = distanceFromCenter * 25; 
+              const yOffset = -Math.pow(Math.abs(distanceFromCenter), 1.2) * 4;
               
               const isShowing = showingCombos.ai && state.announcedCombos.ai.some(combo => combo.cardIds?.includes(card.id));
               
@@ -1453,7 +1583,7 @@ export default function App() {
                   key={card.id}
                   className="absolute transition-all duration-500"
                   style={{
-                    transform: `translateX(${xOffset}px) translateY(${yOffset}px) rotate(${angle + 180}deg)`,
+                    transform: `translateX(${xOffset}px) translateY(${yOffset}px) rotate(${angle}deg)`,
                     zIndex: isShowing ? 100 : index,
                   }}
                 >
@@ -1469,14 +1599,14 @@ export default function App() {
         </div>
 
         {/* Trick Area (Center) */}
-        <div className="relative w-full h-full flex items-center justify-center z-10">
+        <div className="relative w-full h-full flex items-center justify-center z-10 max-[900px]:scale-75 max-[900px]:-translate-y-8">
           <AnimatePresence mode="wait">
             {/* AI Played Card */}
             {state.currentTrick.ai && (
               <motion.div
                 key={`trick-ai-${state.currentTrick.ai.id}`}
                 initial={{ y: -300, x: 0, opacity: 0, rotate: -20 }}
-                animate={{ y: -40, x: 20, opacity: 1, rotate: 5 }}
+                animate={{ y: -20, x: 0, opacity: 1, rotate: 0 }}
                 exit={{ scale: 0, opacity: 0 }}
                 className="absolute z-10"
               >
@@ -1489,7 +1619,7 @@ export default function App() {
               <motion.div
                 key={`trick-player-${state.currentTrick.player.id}`}
                 initial={{ y: 300, x: 0, opacity: 0, rotate: 20 }}
-                animate={{ y: 40, x: -20, opacity: 1, rotate: -5 }}
+                animate={{ y: 20, x: 0, opacity: 1, rotate: 0 }}
                 exit={{ scale: 0, opacity: 0 }}
                 className="absolute z-20"
               >
@@ -1500,7 +1630,7 @@ export default function App() {
         </div>
 
         {/* Player Hand Area (Bottom) */}
-        <div className="absolute bottom-25 left-1/2 -translate-x-1/2 w-full max-w-5xl h-48 flex justify-center items-end z-40">
+        <div className="absolute bottom-12 left-1/2 -translate-x-1/2 w-full max-w-5xl h-32 flex justify-center items-end z-40">
           {(() => {
             const isShowButtonVisible = state.phase === 'PLAYING' && state.playedCards.length === 1 && state.announcedCombos.player.length > 0 && !state.hasShownCombos.player && state.turn === 'player' && state.canShow.player;
             return (
@@ -1512,7 +1642,7 @@ export default function App() {
                       initial={{ opacity: 0, y: 20 }}
                       animate={{ opacity: 1, y: 0 }}
                       exit={{ opacity: 0, y: 20 }}
-                      className="absolute -top-32 left-1/2 -translate-x-1/2 flex flex-col gap-3 bg-black/90 p-4 rounded-2xl border border-white/20 backdrop-blur-xl z-50 min-w-[300px]"
+                      className="absolute -top-24 left-1/2 -translate-x-1/2 flex flex-col gap-3 bg-black/90 p-4 rounded-2xl border border-white/20 backdrop-blur-xl z-50 min-w-[300px]"
                     >
                       <div className="flex gap-2 justify-center">
                         {['Terz', 'Fifty', 'Hundred', 'Carre']
@@ -1624,9 +1754,11 @@ export default function App() {
 
           {state.playerHand.map((card, index) => {
             const total = state.playerHand.length;
-            const angle = (index - (total - 1) / 2) * 4;
-            const xOffset = (index - (total - 1) / 2) * 40;
-            const yOffset = Math.pow(Math.abs(index - (total - 1) / 2), 1.5) * 2;
+            const centerIndex = (total - 1) / 2;
+            const distanceFromCenter = index - centerIndex;
+            const angle = isMobile ? distanceFromCenter * 8 : distanceFromCenter * 4;
+            const xOffset = isMobile ? distanceFromCenter * 35 : distanceFromCenter * 40;
+            const yOffset = isMobile ? Math.pow(Math.abs(distanceFromCenter), 1.2) * 6 : Math.pow(Math.abs(distanceFromCenter), 1.5) * 2;
             
             const leadCard = state.currentTrick.ai;
             const isPlayable = state.turn === 'player' && state.phase === 'PLAYING' && !state.currentTrick.player && !state.isShowingCombo && !isShowButtonVisible && canPlayCard(card, state.playerHand, leadCard, state.trump!).valid;
