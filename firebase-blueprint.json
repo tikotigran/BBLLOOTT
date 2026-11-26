@@ -1,0 +1,339 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Registered player account with display nickname, short ID, avatar, balance, and game statistics.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "nickname": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 24
+        },
+        "shortId": {
+          "type": "string",
+          "minLength": 7,
+          "maxLength": 12,
+          "pattern": "^[0-9]{7}$"
+        },
+        "avatarId": {
+          "type": "string",
+          "enum": ["classic", "emerald", "crimson", "gold"],
+          "maxLength": 24
+        },
+        "balance": {
+          "type": "number"
+        },
+        "gamesPlayed": {
+          "type": "number"
+        },
+        "wins": {
+          "type": "number"
+        },
+        "registrationComplete": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "nickname",
+        "shortId",
+        "avatarId",
+        "balance",
+        "gamesPlayed",
+        "wins",
+        "registrationComplete",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "GameRoom": {
+      "title": "GameRoom",
+      "description": "Online 2-player Blot room state shared between host and guest.",
+      "type": "object",
+      "properties": {
+        "roomCode": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 16,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "hostUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "hostName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 24
+        },
+        "hostShortId": {
+          "type": "string",
+          "maxLength": 12,
+          "pattern": "^[0-9]{7}$"
+        },
+        "guestUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^$|^[a-zA-Z0-9_\\-]+$"
+        },
+        "guestName": {
+          "type": "string",
+          "maxLength": 24
+        },
+        "guestShortId": {
+          "type": "string",
+          "maxLength": 12,
+          "pattern": "^$|^[0-9]{7}$"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["waiting", "playing", "finished"],
+          "maxLength": 16
+        },
+        "tableId": {
+          "type": "number"
+        },
+        "gameLimit": {
+          "type": "number"
+        },
+        "betAmount": {
+          "type": "number"
+        },
+        "allowHighCombos": {
+          "type": "boolean"
+        },
+        "allCombinationsDisabled": {
+          "type": "boolean"
+        },
+        "turnTimeLimit": {
+          "type": "number"
+        },
+        "roundNumber": {
+          "type": "number"
+        },
+        "dealerRole": {
+          "type": "string",
+          "enum": ["host", "guest"],
+          "maxLength": 8
+        },
+        "turnRole": {
+          "type": "string",
+          "enum": ["host", "guest"],
+          "maxLength": 8
+        },
+        "phase": {
+          "type": "string",
+          "enum": ["OFFERING_TRUMP", "SUIT_SELECTION", "PLAYING", "RESULT", "GAME_OVER"],
+          "maxLength": 24
+        },
+        "trump": {
+          "type": "string",
+          "enum": ["", "HEARTS", "DIAMONDS", "CLUBS", "SPADES", "NO_TRUMP"],
+          "maxLength": 16
+        },
+        "bidderRole": {
+          "type": "string",
+          "enum": ["", "host", "guest"],
+          "maxLength": 8
+        },
+        "lastWinnerRole": {
+          "type": "string",
+          "enum": ["", "host", "guest"],
+          "maxLength": 8
+        },
+        "pendingExtraDrawRole": {
+          "type": "string",
+          "enum": ["", "host", "guest"],
+          "maxLength": 8
+        },
+        "winnerUid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^$|^[a-zA-Z0-9_\\-]+$"
+        },
+        "hostScore": {
+          "type": "number"
+        },
+        "guestScore": {
+          "type": "number"
+        },
+        "hostRoundScore": {
+          "type": "number"
+        },
+        "guestRoundScore": {
+          "type": "number"
+        },
+        "hostCardCount": {
+          "type": "number"
+        },
+        "guestCardCount": {
+          "type": "number"
+        },
+        "offeredCard": {
+          "type": "object"
+        },
+        "deck": {
+          "type": "array"
+        },
+        "trickHostCard": {
+          "type": "object"
+        },
+        "trickGuestCard": {
+          "type": "object"
+        },
+        "playedCards": {
+          "type": "array"
+        },
+        "hostAnnouncedCombos": {
+          "type": "array"
+        },
+        "guestAnnouncedCombos": {
+          "type": "array"
+        },
+        "hostDeclaredCombos": {
+          "type": "array"
+        },
+        "guestDeclaredCombos": {
+          "type": "array"
+        },
+        "hostHasShownCombos": {
+          "type": "boolean"
+        },
+        "guestHasShownCombos": {
+          "type": "boolean"
+        },
+        "hostCanDeclare": {
+          "type": "boolean"
+        },
+        "guestCanDeclare": {
+          "type": "boolean"
+        },
+        "hostCanShow": {
+          "type": "boolean"
+        },
+        "guestCanShow": {
+          "type": "boolean"
+        },
+        "hostBlotDeclared": {
+          "type": "boolean"
+        },
+        "guestBlotDeclared": {
+          "type": "boolean"
+        },
+        "roundBreakdown": {
+          "type": "object"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "roomCode",
+        "hostUid",
+        "hostName",
+        "hostShortId",
+        "guestUid",
+        "guestName",
+        "guestShortId",
+        "status",
+        "tableId",
+        "gameLimit",
+        "betAmount",
+        "allowHighCombos",
+        "allCombinationsDisabled",
+        "turnTimeLimit",
+        "roundNumber",
+        "dealerRole",
+        "turnRole",
+        "phase",
+        "trump",
+        "bidderRole",
+        "lastWinnerRole",
+        "pendingExtraDrawRole",
+        "winnerUid",
+        "hostScore",
+        "guestScore",
+        "hostRoundScore",
+        "guestRoundScore",
+        "hostCardCount",
+        "guestCardCount",
+        "deck",
+        "playedCards",
+        "hostAnnouncedCombos",
+        "guestAnnouncedCombos",
+        "hostDeclaredCombos",
+        "guestDeclaredCombos",
+        "hostHasShownCombos",
+        "guestHasShownCombos",
+        "hostCanDeclare",
+        "guestCanDeclare",
+        "hostCanShow",
+        "guestCanShow",
+        "hostBlotDeclared",
+        "guestBlotDeclared",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PlayerHand": {
+      "title": "PlayerHand",
+      "description": "Private cards belonging exclusively to a single player inside an online Blot room.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "maxLength": 128,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "roomId": {
+          "type": "string",
+          "minLength": 4,
+          "maxLength": 16,
+          "pattern": "^[a-zA-Z0-9_\\-]+$"
+        },
+        "cards": {
+          "type": "array"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": ["uid", "roomId", "cards", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "Private player account profile (no PII email/phone stored; owner-only access)."
+    },
+    "/rooms/{roomId}": {
+      "schema": { "$ref": "#/entities/GameRoom" },
+      "description": "Online 2-player Blot table state indexed by invite room code."
+    },
+    "/rooms/{roomId}/hands/{playerId}": {
+      "schema": { "$ref": "#/entities/PlayerHand" },
+      "description": "Private hand subcollection readable exclusively by the owning player."
+    }
+  }
+}

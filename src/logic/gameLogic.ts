@@ -230,8 +230,8 @@ export const calculateRoundScore = (
   // Combinations: only strongest counts
   let pComboPoints = 0;
   let aComboPoints = 0;
-  let pAwardedCombos: { type: string; points: number }[] = [];
-  let aAwardedCombos: { type: string; points: number }[] = [];
+  let pAwardedCombos: { type: string; points: number; highRank?: Rank }[] = [];
+  let aAwardedCombos: { type: string; points: number; highRank?: Rank }[] = [];
 
   const allCombos = [
     ...playerCombos.map(c => ({ ...c, owner: 'player' as const })),
@@ -246,19 +246,19 @@ export const calculateRoundScore = (
     if (!secondStrongest || strongest.strength > secondStrongest.strength) {
       if (strongest.owner === 'player') {
         pComboPoints = playerCombos.reduce((sum, c) => sum + c.points, 0);
-        pAwardedCombos = playerCombos.map(c => ({ type: c.type, points: c.points }));
+        pAwardedCombos = playerCombos.map(c => ({ type: c.type, points: c.points, highRank: c.highRank }));
       } else {
         aComboPoints = aiCombos.reduce((sum, c) => sum + c.points, 0);
-        aAwardedCombos = aiCombos.map(c => ({ type: c.type, points: c.points }));
+        aAwardedCombos = aiCombos.map(c => ({ type: c.type, points: c.points, highRank: c.highRank }));
       }
     } else if (strongest.strength === secondStrongest.strength) {
       if (strongest.owner === secondStrongest.owner) {
         if (strongest.owner === 'player') {
           pComboPoints = playerCombos.reduce((sum, c) => sum + c.points, 0);
-          pAwardedCombos = playerCombos.map(c => ({ type: c.type, points: c.points }));
+          pAwardedCombos = playerCombos.map(c => ({ type: c.type, points: c.points, highRank: c.highRank }));
         } else {
           aComboPoints = aiCombos.reduce((sum, c) => sum + c.points, 0);
-          aAwardedCombos = aiCombos.map(c => ({ type: c.type, points: c.points }));
+          aAwardedCombos = aiCombos.map(c => ({ type: c.type, points: c.points, highRank: c.highRank }));
         }
       }
     }

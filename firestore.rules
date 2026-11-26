@@ -1,0 +1,343 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // --- Primitive Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isVerified() {
+      return request.auth.token.email_verified == true;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
+    }
+
+    function isValidRoomCode(id) {
+      return id is string && id.size() >= 4 && id.size() <= 16 && id.matches('^[a-zA-Z0-9_-]+$');
+    }
+
+    function isValidOptionalId(id) {
+      return id is string && id.size() <= 128 && (id == '' || id.matches('^[a-zA-Z0-9_-]+$'));
+    }
+
+    function isValidShortId(id) {
+      return id is string && id.size() <= 12 && id.matches('^[0-9]{7}$');
+    }
+
+    function isValidOptionalShortId(id) {
+      return id is string && id.size() <= 12 && (id == '' || id.matches('^[0-9]{7}$'));
+    }
+
+    function isValidCardMap(card) {
+      return card is map
+        && card.keys().hasAll(['id', 'suit', 'rank'])
+        && card.keys().hasOnly(['id', 'suit', 'rank'])
+        && card.id is string && card.id.size() >= 3 && card.id.size() <= 24
+        && card.suit is string && card.suit.size() >= 4 && card.suit.size() <= 12
+        && card.rank is string && card.rank.size() >= 1 && card.rank.size() <= 4;
+    }
+
+    // --- Validation Blueprint: UserProfile ---
+    function isValidUserProfile(data) {
+      return data.keys().hasAll([
+          'uid', 'nickname', 'shortId', 'avatarId', 'balance',
+          'gamesPlayed', 'wins', 'registrationComplete', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'uid', 'nickname', 'shortId', 'avatarId', 'balance',
+          'gamesPlayed', 'wins', 'registrationComplete', 'createdAt', 'updatedAt'
+        ])
+        && isValidId(data.uid)
+        && data.uid == request.auth.uid
+        && data.nickname is string && data.nickname.size() >= 2 && data.nickname.size() <= 24
+        && isValidShortId(data.shortId)
+        && data.avatarId is string && data.avatarId.size() <= 24
+        && data.avatarId in ['classic', 'emerald', 'crimson', 'gold']
+        && data.balance is number && data.balance >= 0 && data.balance <= 1000000000
+        && data.gamesPlayed is number && data.gamesPlayed >= 0 && data.gamesPlayed <= 1000000
+        && data.wins is number && data.wins >= 0 && data.wins <= data.gamesPlayed
+        && data.registrationComplete is bool
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    // --- Validation Blueprint: GameRoom (split into focused helpers) ---
+    function isValidGameRoomKeys(data) {
+      return data.keys().hasAll([
+          'roomCode', 'hostUid', 'hostName', 'hostShortId',
+          'guestUid', 'guestName', 'guestShortId', 'status',
+          'tableId', 'gameLimit', 'betAmount', 'allowHighCombos',
+          'allCombinationsDisabled', 'turnTimeLimit', 'roundNumber',
+          'dealerRole', 'turnRole', 'phase', 'trump', 'bidderRole',
+          'lastWinnerRole', 'pendingExtraDrawRole', 'winnerUid',
+          'hostScore', 'guestScore', 'hostRoundScore', 'guestRoundScore',
+          'hostCardCount', 'guestCardCount', 'offeredCard', 'deck',
+          'trickHostCard', 'trickGuestCard', 'playedCards',
+          'hostAnnouncedCombos', 'guestAnnouncedCombos',
+          'hostDeclaredCombos', 'guestDeclaredCombos',
+          'hostHasShownCombos', 'guestHasShownCombos',
+          'hostCanDeclare', 'guestCanDeclare',
+          'hostCanShow', 'guestCanShow',
+          'hostBlotDeclared', 'guestBlotDeclared',
+          'roundBreakdown', 'createdAt', 'updatedAt'
+        ])
+        && data.keys().hasOnly([
+          'roomCode', 'hostUid', 'hostName', 'hostShortId',
+          'guestUid', 'guestName', 'guestShortId', 'status',
+          'tableId', 'gameLimit', 'betAmount', 'allowHighCombos',
+          'allCombinationsDisabled', 'turnTimeLimit', 'roundNumber',
+          'dealerRole', 'turnRole', 'phase', 'trump', 'bidderRole',
+          'lastWinnerRole', 'pendingExtraDrawRole', 'winnerUid',
+          'hostScore', 'guestScore', 'hostRoundScore', 'guestRoundScore',
+          'hostCardCount', 'guestCardCount', 'offeredCard', 'deck',
+          'trickHostCard', 'trickGuestCard', 'playedCards',
+          'hostAnnouncedCombos', 'guestAnnouncedCombos',
+          'hostDeclaredCombos', 'guestDeclaredCombos',
+          'hostHasShownCombos', 'guestHasShownCombos',
+          'hostCanDeclare', 'guestCanDeclare',
+          'hostCanShow', 'guestCanShow',
+          'hostBlotDeclared', 'guestBlotDeclared',
+          'roundBreakdown', 'createdAt', 'updatedAt'
+        ]);
+    }
+
+    function isValidGameRoomMeta(data) {
+      return isValidRoomCode(data.roomCode)
+        && isValidId(data.hostUid)
+        && data.hostName is string && data.hostName.size() >= 1 && data.hostName.size() <= 24
+        && isValidShortId(data.hostShortId)
+        && isValidOptionalId(data.guestUid)
+        && data.guestName is string && data.guestName.size() <= 24
+        && isValidOptionalShortId(data.guestShortId)
+        && data.status is string && data.status.size() <= 16
+        && data.status in ['waiting', 'playing', 'finished']
+        && data.tableId is number && data.tableId >= 100000 && data.tableId <= 9999999999
+        && data.gameLimit is number && data.gameLimit in [51, 101, 151]
+        && data.betAmount is number && data.betAmount >= 1000 && data.betAmount <= 100000
+        && data.allowHighCombos is bool
+        && data.allCombinationsDisabled is bool
+        && data.turnTimeLimit is number && data.turnTimeLimit in [15, 20, 30];
+    }
+
+    function isValidGameRoomState(data) {
+      return data.roundNumber is number && data.roundNumber >= 0 && data.roundNumber <= 100
+        && data.dealerRole is string && data.dealerRole.size() <= 8 && data.dealerRole in ['host', 'guest']
+        && data.turnRole is string && data.turnRole.size() <= 8 && data.turnRole in ['host', 'guest']
+        && data.phase is string && data.phase.size() <= 24
+        && data.phase in ['OFFERING_TRUMP', 'SUIT_SELECTION', 'PLAYING', 'RESULT', 'GAME_OVER']
+        && data.trump is string && data.trump.size() <= 16
+        && data.trump in ['', 'HEARTS', 'DIAMONDS', 'CLUBS', 'SPADES', 'NO_TRUMP']
+        && data.bidderRole is string && data.bidderRole.size() <= 8 && data.bidderRole in ['', 'host', 'guest']
+        && data.lastWinnerRole is string && data.lastWinnerRole.size() <= 8 && data.lastWinnerRole in ['', 'host', 'guest']
+        && data.pendingExtraDrawRole is string && data.pendingExtraDrawRole.size() <= 8 && data.pendingExtraDrawRole in ['', 'host', 'guest']
+        && isValidOptionalId(data.winnerUid)
+        && data.hostScore is number && data.hostScore >= 0 && data.hostScore <= 1000
+        && data.guestScore is number && data.guestScore >= 0 && data.guestScore <= 1000
+        && data.hostRoundScore is number && data.hostRoundScore >= 0 && data.hostRoundScore <= 1000
+        && data.guestRoundScore is number && data.guestRoundScore >= 0 && data.guestRoundScore <= 1000
+        && data.hostCardCount is number && data.hostCardCount >= 0 && data.hostCardCount <= 8
+        && data.guestCardCount is number && data.guestCardCount >= 0 && data.guestCardCount <= 8;
+    }
+
+    function isValidGameRoomArrays(data) {
+      return (data.offeredCard == null || isValidCardMap(data.offeredCard))
+        && data.deck is list && data.deck.size() <= 24
+        && (data.deck.size() == 0 || isValidCardMap(data.deck[0]))
+        && (data.trickHostCard == null || isValidCardMap(data.trickHostCard))
+        && (data.trickGuestCard == null || isValidCardMap(data.trickGuestCard))
+        && data.playedCards is list && data.playedCards.size() <= 8
+        && (data.playedCards.size() == 0 || data.playedCards[0] is map)
+        && data.hostAnnouncedCombos is list && data.hostAnnouncedCombos.size() <= 4
+        && (data.hostAnnouncedCombos.size() == 0 || data.hostAnnouncedCombos[0] is map)
+        && data.guestAnnouncedCombos is list && data.guestAnnouncedCombos.size() <= 4
+        && (data.guestAnnouncedCombos.size() == 0 || data.guestAnnouncedCombos[0] is map)
+        && data.hostDeclaredCombos is list && data.hostDeclaredCombos.size() <= 4
+        && (data.hostDeclaredCombos.size() == 0 || data.hostDeclaredCombos[0] is map)
+        && data.guestDeclaredCombos is list && data.guestDeclaredCombos.size() <= 4
+        && (data.guestDeclaredCombos.size() == 0 || data.guestDeclaredCombos[0] is map)
+        && data.hostHasShownCombos is bool
+        && data.guestHasShownCombos is bool
+        && data.hostCanDeclare is bool
+        && data.guestCanDeclare is bool
+        && data.hostCanShow is bool
+        && data.guestCanShow is bool
+        && data.hostBlotDeclared is bool
+        && data.guestBlotDeclared is bool
+        && (data.roundBreakdown == null || (data.roundBreakdown is map && data.roundBreakdown.size() <= 6))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp;
+    }
+
+    function isValidGameRoom(data) {
+      return isValidGameRoomKeys(data)
+        && isValidGameRoomMeta(data)
+        && isValidGameRoomState(data)
+        && isValidGameRoomArrays(data);
+    }
+
+    // --- Validation Blueprint: PlayerHand ---
+    function isValidPlayerHand(data, playerId, roomId) {
+      return data.keys().hasAll(['uid', 'roomId', 'cards', 'updatedAt'])
+        && data.keys().hasOnly(['uid', 'roomId', 'cards', 'updatedAt'])
+        && isValidId(data.uid)
+        && data.uid == playerId
+        && isValidRoomCode(data.roomId)
+        && data.roomId == roomId
+        && data.cards is list && data.cards.size() <= 8
+        && (data.cards.size() == 0 || isValidCardMap(data.cards[0]))
+        && data.updatedAt is timestamp;
+    }
+
+    // Global Safety Net (Default Deny)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Users Collection ---
+    match /users/{userId} {
+      allow get: if isSignedIn() && isVerified() && isValidId(userId) && request.auth.uid == userId;
+      allow list: if false;
+      allow create: if isSignedIn() && isVerified() && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUserProfile(incoming())
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && isVerified() && isValidId(userId)
+        && request.auth.uid == userId
+        && isValidUserProfile(incoming())
+        && incoming().uid == existing().uid
+        && incoming().shortId == existing().shortId
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'nickname', 'avatarId', 'balance', 'gamesPlayed', 'wins', 'registrationComplete', 'updatedAt'
+        ]);
+      allow delete: if false;
+    }
+
+    // --- Rooms Collection ---
+    match /rooms/{roomId} {
+      allow get: if isSignedIn() && isVerified() && isValidRoomCode(roomId)
+        && (
+          resource == null
+          || existing().status == 'waiting'
+          || existing().hostUid == request.auth.uid
+          || existing().guestUid == request.auth.uid
+        );
+      allow list: if isSignedIn() && isVerified()
+        && (
+          resource.data.status == 'waiting'
+          || resource.data.hostUid == request.auth.uid
+          || resource.data.guestUid == request.auth.uid
+        );
+      allow create: if isSignedIn() && isVerified() && isValidRoomCode(roomId)
+        && isValidGameRoom(incoming())
+        && incoming().roomCode == roomId
+        && incoming().hostUid == request.auth.uid
+        && incoming().guestUid == ''
+        && incoming().status == 'waiting'
+        && incoming().winnerUid == ''
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isSignedIn() && isVerified() && isValidRoomCode(roomId)
+        && isValidGameRoom(incoming())
+        && existing().status != 'finished'
+        && incoming().roomCode == existing().roomCode
+        && incoming().hostUid == existing().hostUid
+        && incoming().hostShortId == existing().hostShortId
+        && incoming().tableId == existing().tableId
+        && incoming().gameLimit == existing().gameLimit
+        && incoming().betAmount == existing().betAmount
+        && incoming().allowHighCombos == existing().allowHighCombos
+        && incoming().allCombinationsDisabled == existing().allCombinationsDisabled
+        && incoming().turnTimeLimit == existing().turnTimeLimit
+        && incoming().createdAt == existing().createdAt
+        && incoming().updatedAt == request.time
+        && (
+          // Action 1: Guest joins a waiting room
+          (
+            existing().status == 'waiting'
+            && existing().guestUid == ''
+            && request.auth.uid != existing().hostUid
+            && incoming().guestUid == request.auth.uid
+            && incoming().status == 'playing'
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'guestUid', 'guestName', 'guestShortId', 'status', 'updatedAt'
+            ])
+          )
+          ||
+          // Action 2: Active participant updates room state during gameplay
+          (
+            existing().status == 'playing'
+            && (request.auth.uid == existing().hostUid || request.auth.uid == existing().guestUid)
+            && incoming().guestUid == existing().guestUid
+            && incoming().guestName == existing().guestName
+            && incoming().guestShortId == existing().guestShortId
+            && incoming().status in ['playing', 'finished']
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'roundNumber', 'dealerRole', 'turnRole', 'phase', 'trump',
+              'bidderRole', 'lastWinnerRole', 'pendingExtraDrawRole', 'winnerUid',
+              'hostScore', 'guestScore', 'hostRoundScore', 'guestRoundScore',
+              'hostCardCount', 'guestCardCount', 'offeredCard', 'deck',
+              'trickHostCard', 'trickGuestCard', 'playedCards',
+              'hostAnnouncedCombos', 'guestAnnouncedCombos',
+              'hostDeclaredCombos', 'guestDeclaredCombos',
+              'hostHasShownCombos', 'guestHasShownCombos',
+              'hostCanDeclare', 'guestCanDeclare',
+              'hostCanShow', 'guestCanShow',
+              'hostBlotDeclared', 'guestBlotDeclared',
+              'roundBreakdown', 'updatedAt'
+            ])
+          )
+          ||
+          // Action 3: Host cancels a waiting room before a guest joins
+          (
+            existing().status == 'waiting'
+            && request.auth.uid == existing().hostUid
+            && incoming().status == 'finished'
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'status', 'updatedAt'
+            ])
+          )
+        );
+      allow delete: if false;
+
+      // --- Hands Subcollection (Master Gate + Owner-Only Read + Atomic Sync) ---
+      match /hands/{playerId} {
+        allow get: if isSignedIn() && isVerified()
+          && isValidRoomCode(roomId) && isValidId(playerId)
+          && request.auth.uid == playerId
+          && exists(/databases/$(database)/documents/rooms/$(roomId))
+          && (
+            get(/databases/$(database)/documents/rooms/$(roomId)).data.hostUid == request.auth.uid
+            || get(/databases/$(database)/documents/rooms/$(roomId)).data.guestUid == request.auth.uid
+          );
+        allow list: if false;
+        allow create, update: if isSignedIn() && isVerified()
+          && isValidRoomCode(roomId) && isValidId(playerId)
+          && isValidPlayerHand(incoming(), playerId, roomId)
+          && incoming().updatedAt == request.time
+          && exists(/databases/$(database)/documents/rooms/$(roomId))
+          && (
+            get(/databases/$(database)/documents/rooms/$(roomId)).data.hostUid == request.auth.uid
+            || (
+              get(/databases/$(database)/documents/rooms/$(roomId)).data.guestUid == request.auth.uid
+              && request.auth.uid == playerId
+            )
+          )
+          && getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.updatedAt == request.time;
+        allow delete: if false;
+      }
+    }
+  }
+}

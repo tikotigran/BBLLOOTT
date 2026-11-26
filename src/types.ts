@@ -49,11 +49,11 @@ export interface Combination {
 
 export interface RoundBreakdown {
   tricks: number;
-  combos: { type: string; points: number }[];
+  combos: { type: string; points: number; highRank?: Rank }[];
   total: number;
   finalPaper: number;
   originalTricks: number;
-  originalCombos: { type: string; points: number }[];
+  originalCombos: { type: string; points: number; highRank?: Rank }[];
 }
 
 export interface GameState {
@@ -92,10 +92,43 @@ export interface GameState {
   allowHighCombos: boolean;
   allCombinationsDisabled: boolean;
   gameLimit: number;
+  betAmount: number;
   roundNumber: number;
   timeLeft: number;
   turnTimeLimit: number;
   playerTimeBank: number;
   aiTimeBank: number;
   tableId: number;
+}
+
+export type TableTheme = 'slate' | 'emerald' | 'navy' | 'burgundy';
+export type CardBackTheme = 'slate' | 'crimson' | 'emerald' | 'navy';
+export type TrickLayout = 'overlap' | 'sideBySide';
+export type ScoreAnchor = 'bottomRight' | 'topRight' | 'bottomLeft' | 'hidden';
+export type AiSpeed = 'fast' | 'normal' | 'slow';
+
+export interface TableSettings {
+  playerFanSpread: number;
+  playerFanAngle: number;
+  playerFanArc: number;
+  playerHandOffsetX: number;
+  playerHandOffsetY: number;
+  aiFanSpread: number;
+  aiHandOffsetY: number;
+  cardScale: number;
+  cardBackTheme: CardBackTheme;
+  showBottomIndex: boolean;
+  tableTheme: TableTheme;
+  trickLayout: TrickLayout;
+  trickOffset: number;
+  deckOffsetX: number;
+  deckOffsetY: number;
+  scorePanelAnchor: ScoreAnchor;
+  showToasts: boolean;
+  highlightPlayable: boolean;
+  showTimers: boolean;
+  showRoundResultModal: boolean;
+  botsEnabled: boolean;
+  botAutoPlay: boolean;
+  aiSpeed: AiSpeed;
 }
