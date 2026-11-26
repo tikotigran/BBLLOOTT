@@ -50,14 +50,22 @@ export const AuthModal: React.FC<AuthModalProps> = ({
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : '';
-      if (msg.includes('popup-closed-by-user')) {
-        setError('Окно входа было закрыто.');
-      } else if (msg.includes('popup-blocked')) {
-        setError('Браузер заблокировал всплывающее окно. Разрешите popup для входа.');
-      } else {
-        setError('Не удалось войти через Google. Попробуйте ещё раз.');
-      }
+      const code =
+        typeof err === 'object' && err !== null && 'code' in err && typeof err.code === 'string'
+          ? err.code
+          : '';
+      const messages: Record<string, string> = {
+        'auth/popup-closed-by-user': 'Окно входа было закрыто. Попробуйте ещё раз.',
+        'auth/popup-blocked': 'Браузер заблокировал окно входа. Разрешите всплывающие окна для этого сайта.',
+        'auth/unauthorized-domain': 'Домен сайта не разрешён в Firebase. Добавьте текущий домен в Firebase Console → Authentication → Settings → Authorized domains.',
+        'auth/operation-not-allowed': 'Вход через Google отключён. Включите Google в Firebase Console → Authentication → Sign-in method.',
+        'auth/network-request-failed': 'Не удалось подключиться к Firebase. Проверьте интернет-соединение и попробуйте ещё раз.',
+        'auth/too-many-requests': 'Слишком много попыток входа. Подождите немного и попробуйте снова.',
+      };
+      setError(
+        messages[code] ||
+          `Не удалось войти через Google${code ? ` (${code})` : ''}. Проверьте настройки Firebase Authentication и попробуйте ещё раз.`
+      );
     } finally {
       setBusy(false);
     }
