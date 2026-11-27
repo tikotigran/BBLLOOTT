@@ -1764,21 +1764,27 @@ export default function App() {
     exitGameImmersiveMode();
     if (isOnline && onlineRoom) {
       if (onlineRoom.status === 'waiting' && myRole === 'host') {
-        void cancelWaitingOnlineRoom(onlineRoom.roomCode, firebaseUser?.uid);
+        void cancelWaitingOnlineRoom(onlineRoom.roomCode, firebaseUser?.uid).catch((err) =>
+          showToast(getRoomErrorMessage(err, 'Не удалось закрыть стол.'))
+        );
       } else if (onlineRoom.status === 'playing') {
-        void onlineForfeitRoom(onlineRoom, myRole);
+        void onlineForfeitRoom(onlineRoom, myRole).catch((err) =>
+          showToast(getRoomErrorMessage(err, 'Не удалось завершить партию.'))
+        );
       }
       setOnlineRoomCode(null);
       setOnlineRoom(null);
       setOnlineHand([]);
     } else if (onlineRoomCode) {
-      void cancelWaitingOnlineRoom(onlineRoomCode, firebaseUser?.uid);
+      void cancelWaitingOnlineRoom(onlineRoomCode, firebaseUser?.uid).catch((err) =>
+        showToast(getRoomErrorMessage(err, 'Не удалось закрыть стол.'))
+      );
       setOnlineRoomCode(null);
       setOnlineRoom(null);
       setOnlineHand([]);
     }
     setCurrentScreen('LOBBY');
-  }, [isOnline, onlineRoom, onlineRoomCode, myRole, firebaseUser?.uid, exitGameImmersiveMode]);
+  }, [isOnline, onlineRoom, onlineRoomCode, myRole, firebaseUser?.uid, exitGameImmersiveMode, showToast]);
 
   const handleCreateGame = () => {
     if (!settings.botsEnabled) {
@@ -1810,7 +1816,7 @@ export default function App() {
       }
       showToast('Стол удалён');
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Ошибка удаления стола');
+      showToast(getRoomErrorMessage(err, 'Ошибка удаления стола'));
     }
   };
 
