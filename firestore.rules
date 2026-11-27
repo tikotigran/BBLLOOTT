@@ -18,6 +18,12 @@ service cloud.firestore {
       return resource.data;
     }
 
+    function isRecentServerTime(ts) {
+      return ts is timestamp
+        && ts >= request.time - duration.value(5, 's')
+        && ts <= request.time + duration.value(5, 's');
+    }
+
     function isValidId(id) {
       return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_-]+$');
     }
@@ -217,8 +223,8 @@ service cloud.firestore {
         && isValidUserProfile(incoming())
         && incoming().uid == existing().uid
         && incoming().shortId == existing().shortId
-        && incoming().createdAt == existing().createdAt
-        && incoming().updatedAt == request.time
+        && !incoming().diff(existing()).affectedKeys().hasAny(['createdAt'])
+        && isRecentServerTime(incoming().updatedAt)
         && incoming().diff(existing()).affectedKeys().hasOnly([
           'nickname', 'avatarId', 'balance', 'gamesPlayed', 'wins', 'registrationComplete', 'updatedAt'
         ]);
@@ -250,6 +256,7 @@ service cloud.firestore {
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
       allow update: if isSignedIn() && isVerified() && isValidRoomCode(roomId)
+        && isValidGameRoom(incoming())
         && existing().status != 'finished'
         && incoming().roomCode == existing().roomCode
         && incoming().hostUid == existing().hostUid
@@ -260,13 +267,12 @@ service cloud.firestore {
         && incoming().allowHighCombos == existing().allowHighCombos
         && incoming().allCombinationsDisabled == existing().allCombinationsDisabled
         && incoming().turnTimeLimit == existing().turnTimeLimit
-        && incoming().createdAt == existing().createdAt
-        && incoming().updatedAt == request.time
+        && !incoming().diff(existing()).affectedKeys().hasAny(['createdAt'])
+        && isRecentServerTime(incoming().updatedAt)
         && (
           // Action 1: Guest joins a waiting room
           (
-            isValidGameRoom(incoming())
-            && existing().status == 'waiting'
+            existing().status == 'waiting'
             && existing().guestUid == ''
             && request.auth.uid != existing().hostUid
             && incoming().guestUid == request.auth.uid
@@ -278,8 +284,7 @@ service cloud.firestore {
           ||
           // Action 2: Active participant updates room state during gameplay
           (
-            isValidGameRoom(incoming())
-            && existing().status == 'playing'
+            existing().status == 'playing'
             && (request.auth.uid == existing().hostUid || request.auth.uid == existing().guestUid)
             && incoming().guestUid == existing().guestUid
             && incoming().guestName == existing().guestName
@@ -329,7 +334,7 @@ service cloud.firestore {
         allow create, update: if isSignedIn() && isVerified()
           && isValidRoomCode(roomId) && isValidId(playerId)
           && isValidPlayerHand(incoming(), playerId, roomId)
-          && incoming().updatedAt == request.time
+          && isRecentServerTime(incoming().updatedAt)
           && exists(/databases/$(database)/documents/rooms/$(roomId))
           && (
             get(/databases/$(database)/documents/rooms/$(roomId)).data.hostUid == request.auth.uid
@@ -338,7 +343,7 @@ service cloud.firestore {
               && request.auth.uid == playerId
             )
           )
-          && getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.updatedAt == request.time;
+          && isRecentServerTime(getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.updatedAt);
         allow delete: if false;
       }
     }

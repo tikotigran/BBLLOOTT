@@ -216,16 +216,33 @@ const getRoomErrorMessage = (error: unknown, fallback: string): string => {
         ? error
         : '';
 
+  let parsedOp = '';
+  let parsedPath = '';
+  let emailVerified: boolean | null = null;
   try {
-    const details = JSON.parse(message) as { error?: unknown };
-    if (typeof details.error === 'string') message = details.error;
+    const parsed = JSON.parse(message) as {
+      error?: unknown;
+      operationType?: unknown;
+      path?: unknown;
+      authInfo?: { emailVerified?: unknown };
+    };
+    if (typeof parsed.error === 'string') message = parsed.error;
+    if (typeof parsed.operationType === 'string') parsedOp = parsed.operationType;
+    if (typeof parsed.path === 'string') parsedPath = parsed.path;
+    if (typeof parsed.authInfo?.emailVerified === 'boolean') {
+      emailVerified = parsed.authInfo.emailVerified;
+    }
   } catch {
     // Firebase errors can also arrive as plain messages.
   }
 
   const details = `${code} ${message}`.toLowerCase();
   if (details.includes('permission-denied') || details.includes('missing or insufficient permissions')) {
-    return 'Нет доступа к столу. Оба игрока должны войти через Google и завершить регистрацию профиля. Проверьте подтверждение аккаунта Google.';
+    const opTag = parsedOp && parsedPath ? ` (${parsedOp}: ${parsedPath})` : '';
+    if (emailVerified === false) {
+      return `Аккаунт Google не подтверждён${opTag}. Войдите через подтверждённый аккаунт Google.`;
+    }
+    return `Нет доступа к столу${opTag}. Убедитесь, что стол ещё открыт и оба игрока вошли через Google.`;
   }
   if (details.includes('unavailable') || details.includes('offline') || details.includes('network')) {
     return 'Не удалось связаться с сервером. Проверьте интернет и попробуйте ещё раз.';
@@ -285,6 +302,8 @@ export default function App() {
   const [copiedInvite, setCopiedInvite] = useState(false);
   const initializedRef = useRef(false);
   const recordedMatchRef = useRef<string | null>(null);
+  const dealingRoomRef = useRef<string | null>(null);
+  const extraDrawRoomRef = useRef<string | null>(null);
   const showToastsRef = useRef(settings.showToasts);
 
   useEffect(() => {
@@ -454,9 +473,17 @@ export default function App() {
       onlineRoom.roundNumber === 0 &&
       myRole === 'host'
     ) {
-      void dealOnlineRound(onlineRoom, true);
+      const key = `${onlineRoom.roomCode}-0`;
+      if (dealingRoomRef.current === key) return;
+      dealingRoomRef.current = key;
+      void dealOnlineRound(onlineRoom, true).catch((err) => {
+        dealingRoomRef.current = null;
+        showToast(getRoomErrorMessage(err, 'Не удалось раздать карты.'));
+      });
+    } else if (!onlineRoom || onlineRoom.roundNumber > 0) {
+      dealingRoomRef.current = null;
     }
-  }, [isOnline, onlineRoom, myRole]);
+  }, [isOnline, onlineRoom, myRole, showToast]);
 
   // Non-taker automatically draws 3 extra cards after opponent takes trump
   useEffect(() => {
@@ -466,9 +493,17 @@ export default function App() {
       firebaseUser &&
       onlineRoom.pendingExtraDrawRole === myRole
     ) {
-      void onlineDrawExtraCards(onlineRoom, myRole, firebaseUser.uid, onlineHand);
+      const key = `${onlineRoom.roomCode}-${onlineRoom.roundNumber}-${myRole}`;
+      if (extraDrawRoomRef.current === key) return;
+      extraDrawRoomRef.current = key;
+      void onlineDrawExtraCards(onlineRoom, myRole, firebaseUser.uid, onlineHand).catch((err) => {
+        extraDrawRoomRef.current = null;
+        showToast(getRoomErrorMessage(err, 'Не удалось добрать карты.'));
+      });
+    } else if (!onlineRoom?.pendingExtraDrawRole) {
+      extraDrawRoomRef.current = null;
     }
-  }, [isOnline, onlineRoom, firebaseUser, myRole, onlineHand]);
+  }, [isOnline, onlineRoom, firebaseUser, myRole, onlineHand, showToast]);
 
   // Host resolves completed online trick
   useEffect(() => {
@@ -480,11 +515,13 @@ export default function App() {
       onlineRoom.trickGuestCard
     ) {
       const timer = setTimeout(() => {
-        void onlineResolveTrick(onlineRoom);
+        void onlineResolveTrick(onlineRoom).catch((err) => {
+          showToast(getRoomErrorMessage(err, 'Не удалось завершить взятку.'));
+        });
       }, 1100);
       return () => clearTimeout(timer);
     }
-  }, [isOnline, onlineRoom, myRole]);
+  }, [isOnline, onlineRoom, myRole, showToast]);
 
   const activeState: GameState = useMemo(() => {
     if (!isOnline || !onlineRoom) return state;
@@ -728,7 +765,9 @@ export default function App() {
 
       if (!override && isOnline && onlineRoom) {
         if (myRole === 'host') {
-          void dealOnlineRound(onlineRoom, onlineRoom.phase === 'GAME_OVER');
+          void dealOnlineRound(onlineRoom, onlineRoom.phase === 'GAME_OVER').catch((err) => {
+            showToast(getRoomErrorMessage(err, 'Не удалось начать следующий раунд.'));
+          });
         }
         return;
       }
@@ -778,7 +817,7 @@ export default function App() {
         roundNumber: isNewGame ? 1 : merged.roundNumber + 1,
       };
     });
-  }, []);
+  }, [isOnline, onlineRoom, myRole, showToast]);
 
   useEffect(() => {
     if (!initializedRef.current) {
@@ -831,8 +870,9 @@ export default function App() {
       playChimeSound(true);
       if (isOnline && onlineRoom && firebaseUser) {
         if (player === 'player') {
-          void onlineTakeTrump(onlineRoom, myRole, firebaseUser.uid, onlineHand, trump);
-          showToast(`Вы взяли козырь ${suitGlyph(trump)}`);
+          void onlineTakeTrump(onlineRoom, myRole, firebaseUser.uid, onlineHand, trump)
+            .then(() => showToast(`Вы взяли козырь ${suitGlyph(trump)}`))
+            .catch((err) => showToast(getRoomErrorMessage(err, 'Не удалось выбрать козырь.')));
         }
         return;
       }
@@ -997,7 +1037,9 @@ export default function App() {
           remaining,
           card,
           newBlotDeclared
-        );
+        ).catch((err) => {
+          showToast(getRoomErrorMessage(err, 'Не удалось сыграть карту.'));
+        });
         return;
       }
 
@@ -1124,8 +1166,9 @@ export default function App() {
 
   const handlePassTrump = useCallback(() => {
     if (isOnline && onlineRoom) {
-      void onlinePassTrump(onlineRoom, myRole);
-      showToast('Вы спасовали');
+      void onlinePassTrump(onlineRoom, myRole)
+        .then(() => showToast('Вы спасовали'))
+        .catch((err) => showToast(getRoomErrorMessage(err, 'Не удалось спасовать.')));
       return;
     }
     setState((prev) => {
@@ -1184,8 +1227,9 @@ export default function App() {
       );
 
       if (isOnline && onlineRoom) {
-        void onlineAnnounceCombo(onlineRoom, myRole, bestOfType);
-        showToast(`Объявлено: ${translateCombo(type)}`);
+        void onlineAnnounceCombo(onlineRoom, myRole, bestOfType)
+          .then(() => showToast(`Объявлено: ${translateCombo(type)}`))
+          .catch((err) => showToast(getRoomErrorMessage(err, 'Не удалось объявить комбинацию.')));
         setIsComboMenuOpen(false);
         return;
       }
@@ -1295,8 +1339,9 @@ export default function App() {
     playChimeSound(true);
 
     if (isOnline && onlineRoom) {
-      void onlineShowCombos(onlineRoom, myRole, pCombos);
-      showToast(`Показано: +${totalPoints} очков`);
+      void onlineShowCombos(onlineRoom, myRole, pCombos)
+        .then(() => showToast(`Показано: +${totalPoints} очков`))
+        .catch((err) => showToast(getRoomErrorMessage(err, 'Не удалось показать комбинацию.')));
       return;
     }
 
@@ -1827,7 +1872,6 @@ export default function App() {
       showToast('Войдите через Google и завершите регистрацию профиля, чтобы создать стол');
       return;
     }
-    enterGameImmersiveMode();
     setRoomAction('creating');
     try {
       const code = await createOnlineRoom(userProfile, {
@@ -1837,6 +1881,7 @@ export default function App() {
         allCombinationsDisabled: state.allCombinationsDisabled,
         turnTimeLimit: state.turnTimeLimit,
       });
+      enterGameImmersiveMode();
       setOnlineRoomCode(code);
       setCurrentScreen('GAME');
       setCopiedInvite(false);
@@ -1861,10 +1906,10 @@ export default function App() {
       showToast('Войдите через Google и завершите регистрацию, чтобы присоединиться');
       return;
     }
-    enterGameImmersiveMode();
     setRoomAction('joining');
     try {
       const code = await joinOnlineRoom(clean, userProfile);
+      enterGameImmersiveMode();
       setOnlineRoomCode(code);
       setCurrentScreen('GAME');
       showToast(`Подключено к столу ${code}`);

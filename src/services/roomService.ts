@@ -11,7 +11,7 @@ import {
   serverTimestamp,
   Unsubscribe,
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType } from '../firebase';
+import { auth, db, handleFirestoreError, OperationType } from '../firebase';
 import { Card, Combination, Rank, Suit, TrumpType } from '../types';
 import { createDeck, calculateRoundScore, resolveTrick } from '../logic/gameLogic';
 import { getCardValue } from '../constants';
@@ -147,19 +147,29 @@ export const joinOnlineRoom = async (
   }
   const path = `rooms/${roomCode}`;
   const ref = doc(db, 'rooms', roomCode);
+  const activeUid = auth.currentUser?.uid || guest.uid;
+  if (!activeUid) {
+    throw new RoomActionError('Войдите через Google, чтобы подключиться к столу');
+  }
   const safeShortId = SHORT_ID_PATTERN.test(guest.shortId || '')
     ? guest.shortId
-    : deriveShortIdFromUid(guest.uid);
+    : deriveShortIdFromUid(activeUid);
 
   try {
     await runTransaction(db, async (tx) => {
-      const snap = await tx.get(ref);
+      let snap;
+      try {
+        snap = await tx.get(ref);
+      } catch (readError) {
+        handleFirestoreError(readError, OperationType.GET, path);
+      }
+
       if (!snap.exists()) {
         throw new RoomActionError('Стол с таким кодом не найден');
       }
 
       const room = snap.data() as OnlineRoomDoc;
-      if (room.hostUid === guest.uid || room.guestUid === guest.uid) {
+      if (room.hostUid === activeUid || room.guestUid === activeUid) {
         if (room.status === 'finished') {
           throw new RoomActionError('Эта игра уже завершена');
         }
@@ -175,7 +185,7 @@ export const joinOnlineRoom = async (
       }
 
       tx.update(ref, {
-        guestUid: guest.uid,
+        guestUid: activeUid,
         guestName: sanitizeNickname(guest.nickname) || 'Игрок 2',
         guestShortId: safeShortId,
         status: 'playing',
@@ -186,6 +196,16 @@ export const joinOnlineRoom = async (
   } catch (error) {
     if (error instanceof RoomActionError) {
       throw error;
+    }
+    if (error instanceof Error) {
+      try {
+        const parsed = JSON.parse(error.message) as { operationType?: string };
+        if (parsed.operationType) {
+          throw error;
+        }
+      } catch (parseErr) {
+        if (parseErr === error) throw error;
+      }
     }
     handleFirestoreError(error, OperationType.UPDATE, path);
   }

@@ -21,7 +21,8 @@ test('Dirty Dozen security invariants & Firestore rule structure', () => {
   assert.ok(rulesText.includes("incoming().diff(existing()).affectedKeys().hasOnly([\n              'status', 'updatedAt'\n            ])"));
   assert.ok(rulesText.includes("allow delete: if isSignedIn() && isVerified() && isValidRoomCode(roomId)\n        && existing().status == 'waiting'\n        && existing().hostUid == request.auth.uid;"));
   assert.ok(roomServiceText.includes("if (live.hostUid !== callerUid) return;\n        tx.delete(ref);"));
-  assert.ok(rulesText.includes('getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.updatedAt == request.time'));
+  assert.ok(rulesText.includes('isRecentServerTime(getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.updatedAt)'));
+  assert.ok(rulesText.includes('isRecentServerTime(incoming().updatedAt)'));
   assert.ok(!rulesText.includes('allow read: if isSignedIn();'));
 
   // 1 & 2: Valid user profile vs Cross-user / Ghost field injection
