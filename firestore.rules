@@ -44,10 +44,6 @@ service cloud.firestore {
       return id is string && id.size() <= 12 && (id == '' || id.matches('^[0-9]{7}$'));
     }
 
-    function isValidPasswordHash(h) {
-      return h is string && h.size() == 64 && h.matches('^[0-9a-f]{64}$');
-    }
-
     function isValidCardMap(card) {
       return card is map
         && card.keys().hasAll(['id', 'suit', 'rank'])
@@ -117,7 +113,7 @@ service cloud.firestore {
           'hostCanDeclare', 'guestCanDeclare',
           'hostCanShow', 'guestCanShow',
           'hostBlotDeclared', 'guestBlotDeclared',
-          'roundBreakdown', 'passwordHash', 'joinPasswordHash', 'createdAt', 'updatedAt'
+          'roundBreakdown', 'createdAt', 'updatedAt'
         ]);
     }
 
@@ -136,9 +132,7 @@ service cloud.firestore {
         && data.betAmount is number && data.betAmount >= 1000 && data.betAmount <= 100000
         && data.allowHighCombos is bool
         && data.allCombinationsDisabled is bool
-        && data.turnTimeLimit is number && data.turnTimeLimit in [15, 20, 30]
-        && (!('passwordHash' in data) || isValidPasswordHash(data.passwordHash))
-        && (!('joinPasswordHash' in data) || isValidPasswordHash(data.joinPasswordHash));
+        && data.turnTimeLimit is number && data.turnTimeLimit in [15, 20, 30];
     }
 
     function isValidGameRoomState(data) {
@@ -222,8 +216,8 @@ service cloud.firestore {
       allow create: if isSignedIn() && isVerified() && isValidId(userId)
         && request.auth.uid == userId
         && isValidUserProfile(incoming())
-        && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time;
+        && isRecentServerTime(incoming().createdAt)
+        && isRecentServerTime(incoming().updatedAt);
       allow update: if isSignedIn() && isVerified() && isValidId(userId)
         && request.auth.uid == userId
         && isValidUserProfile(incoming())
@@ -259,11 +253,8 @@ service cloud.firestore {
         && incoming().guestUid == ''
         && incoming().status == 'waiting'
         && incoming().winnerUid == ''
-        && 'passwordHash' in incoming()
-        && isValidPasswordHash(incoming().passwordHash)
-        && !('joinPasswordHash' in incoming())
-        && incoming().createdAt == request.time
-        && incoming().updatedAt == request.time;
+        && isRecentServerTime(incoming().createdAt)
+        && isRecentServerTime(incoming().updatedAt);
       allow update: if isSignedIn() && isVerified() && isValidRoomCode(roomId)
         && isValidGameRoom(incoming())
         && existing().status != 'finished'
@@ -276,19 +267,19 @@ service cloud.firestore {
         && incoming().allowHighCombos == existing().allowHighCombos
         && incoming().allCombinationsDisabled == existing().allCombinationsDisabled
         && incoming().turnTimeLimit == existing().turnTimeLimit
-        && !incoming().diff(existing()).affectedKeys().hasAny(['createdAt', 'passwordHash'])
+        && !incoming().diff(existing()).affectedKeys().hasAny(['createdAt'])
         && isRecentServerTime(incoming().updatedAt)
         && (
-          // Action 1: Guest joins a waiting room (verifies password hash when set)
+          // Action 1: Any verified player joins an active open waiting room
           (
             existing().status == 'waiting'
             && existing().guestUid == ''
+            && isRecentServerTime(existing().updatedAt)
             && request.auth.uid != existing().hostUid
             && incoming().guestUid == request.auth.uid
             && incoming().status == 'playing'
-            && (!('passwordHash' in existing()) || ('joinPasswordHash' in incoming() && incoming().joinPasswordHash == existing().passwordHash))
             && incoming().diff(existing()).affectedKeys().hasOnly([
-              'guestUid', 'guestName', 'guestShortId', 'joinPasswordHash', 'status', 'updatedAt'
+              'guestUid', 'guestName', 'guestShortId', 'status', 'updatedAt'
             ])
           )
           ||
@@ -323,6 +314,16 @@ service cloud.firestore {
             && incoming().status == 'finished'
             && incoming().diff(existing()).affectedKeys().hasOnly([
               'status', 'updatedAt'
+            ])
+          )
+          ||
+          // Action 4: Host refreshes waiting room presence heartbeat
+          (
+            existing().status == 'waiting'
+            && request.auth.uid == existing().hostUid
+            && incoming().status == 'waiting'
+            && incoming().diff(existing()).affectedKeys().hasOnly([
+              'updatedAt'
             ])
           )
         );

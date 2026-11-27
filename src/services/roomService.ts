@@ -6,6 +6,7 @@ import {
   query,
   runTransaction,
   setDoc,
+  updateDoc,
   where,
   writeBatch,
   serverTimestamp,
@@ -21,8 +22,7 @@ import {
   SHORT_ID_PATTERN,
   deriveShortIdFromUid,
   generateRoomCode,
-  hashRoomPassword,
-  isValidRoomPassword,
+  isWaitingRoomActive,
   sanitizeCard,
   sanitizeComboList,
   sanitizeNickname,
@@ -69,16 +69,12 @@ export interface CreateRoomOptions {
   allowHighCombos: boolean;
   allCombinationsDisabled: boolean;
   turnTimeLimit: number;
-  password: string;
 }
 
 export const createOnlineRoom = async (
   host: UserProfile,
   options: CreateRoomOptions
 ): Promise<string> => {
-  if (!isValidRoomPassword(options.password || '')) {
-    throw new RoomActionError('Введите пароль стола (от 2 до 20 символов)');
-  }
   const activeUid = auth.currentUser?.uid || host.uid;
   if (!activeUid) {
     throw new RoomActionError('Войдите через Google, чтобы создать стол');
@@ -87,7 +83,6 @@ export const createOnlineRoom = async (
     ? host.shortId
     : deriveShortIdFromUid(activeUid);
   const roomCode = generateRoomCode();
-  const passwordHash = hashRoomPassword(roomCode, options.password);
   const path = `rooms/${roomCode}`;
   const ref = doc(db, 'rooms', roomCode);
 
@@ -139,7 +134,6 @@ export const createOnlineRoom = async (
     hostBlotDeclared: false,
     guestBlotDeclared: false,
     roundBreakdown: null,
-    passwordHash,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
@@ -154,8 +148,7 @@ export const createOnlineRoom = async (
 
 export const joinOnlineRoom = async (
   rawCode: string,
-  guest: UserProfile,
-  password?: string
+  guest: UserProfile
 ): Promise<string> => {
   const roomCode = sanitizeRoomCode(rawCode);
   if (roomCode.length < 4) {
@@ -200,24 +193,14 @@ export const joinOnlineRoom = async (
         throw new RoomActionError('К этому столу уже подключился другой игрок');
       }
 
-      let joinPasswordHash: string | undefined;
-      if (room.passwordHash) {
-        const cleanPass = (password || '').trim();
-        if (!cleanPass) {
-          throw new RoomActionError('Введите пароль стола');
-        }
-        const attemptHash = hashRoomPassword(roomCode, cleanPass);
-        if (attemptHash !== room.passwordHash) {
-          throw new RoomActionError('Неверный пароль стола');
-        }
-        joinPasswordHash = attemptHash;
+      if (!isWaitingRoomActive(room)) {
+        throw new RoomActionError('Создатель стола сейчас не в сети — стол деактивирован');
       }
 
       tx.update(ref, {
         guestUid: activeUid,
         guestName: sanitizeNickname(guest.nickname) || 'Игрок 2',
         guestShortId: safeShortId,
-        ...(joinPasswordHash ? { joinPasswordHash } : {}),
         status: 'playing',
         updatedAt: serverTimestamp(),
       });
@@ -275,6 +258,21 @@ export const cancelWaitingOnlineRoom = async (
     });
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
+  }
+};
+
+export const touchWaitingRoomHeartbeat = async (
+  roomCode: string,
+  hostUid?: string
+): Promise<void> => {
+  const activeUid = auth.currentUser?.uid || hostUid;
+  if (!activeUid || !roomCode) return;
+  try {
+    await updateDoc(doc(db, 'rooms', roomCode), {
+      updatedAt: serverTimestamp(),
+    });
+  } catch {
+    // Ignore transient race if guest just joined (status became playing) or room was deleted.
   }
 };
 
