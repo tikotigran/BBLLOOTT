@@ -311,7 +311,9 @@ service cloud.firestore {
             ])
           )
         );
-      allow delete: if false;
+      allow delete: if isSignedIn() && isVerified() && isValidRoomCode(roomId)
+        && existing().status == 'waiting'
+        && existing().hostUid == request.auth.uid;
 
       // --- Hands Subcollection (Master Gate + Owner-Only Read + Atomic Sync) ---
       match /hands/{playerId} {

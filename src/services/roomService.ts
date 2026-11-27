@@ -208,11 +208,8 @@ export const cancelWaitingOnlineRoom = async (
       if (callerUid && live.hostUid !== callerUid && live.guestUid !== callerUid) return;
 
       if (live.status === 'waiting') {
-        if (callerUid && live.hostUid !== callerUid) return;
-        tx.update(ref, {
-          status: 'finished',
-          updatedAt: serverTimestamp(),
-        });
+        if (live.hostUid !== callerUid) return;
+        tx.delete(ref);
       } else if (live.status === 'playing') {
         const winnerUid =
           callerUid && callerUid === live.hostUid
@@ -227,7 +224,7 @@ export const cancelWaitingOnlineRoom = async (
       }
     });
   } catch (error) {
-    handleFirestoreError(error, OperationType.UPDATE, path);
+    handleFirestoreError(error, OperationType.WRITE, path);
   }
 };
 
