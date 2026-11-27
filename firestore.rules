@@ -250,7 +250,6 @@ service cloud.firestore {
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
       allow update: if isSignedIn() && isVerified() && isValidRoomCode(roomId)
-        && isValidGameRoom(incoming())
         && existing().status != 'finished'
         && incoming().roomCode == existing().roomCode
         && incoming().hostUid == existing().hostUid
@@ -266,7 +265,8 @@ service cloud.firestore {
         && (
           // Action 1: Guest joins a waiting room
           (
-            existing().status == 'waiting'
+            isValidGameRoom(incoming())
+            && existing().status == 'waiting'
             && existing().guestUid == ''
             && request.auth.uid != existing().hostUid
             && incoming().guestUid == request.auth.uid
@@ -278,7 +278,8 @@ service cloud.firestore {
           ||
           // Action 2: Active participant updates room state during gameplay
           (
-            existing().status == 'playing'
+            isValidGameRoom(incoming())
+            && existing().status == 'playing'
             && (request.auth.uid == existing().hostUid || request.auth.uid == existing().guestUid)
             && incoming().guestUid == existing().guestUid
             && incoming().guestName == existing().guestName

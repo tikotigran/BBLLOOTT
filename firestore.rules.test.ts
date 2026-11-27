@@ -16,6 +16,8 @@ test('Dirty Dozen security invariants & Firestore rule structure', () => {
   assert.ok(rulesText.includes('allow read, write: if false;'));
   assert.ok(rulesText.includes('request.auth.token.email_verified == true'));
   assert.ok(rulesText.includes("existing().status != 'finished'"));
+  assert.ok(rulesText.includes("existing().status == 'waiting'\n            && request.auth.uid == existing().hostUid\n            && incoming().status == 'finished'"));
+  assert.ok(rulesText.includes("incoming().diff(existing()).affectedKeys().hasOnly([\n              'status', 'updatedAt'\n            ])"));
   assert.ok(rulesText.includes('getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.updatedAt == request.time'));
   assert.ok(!rulesText.includes('allow read: if isSignedIn();'));
 
