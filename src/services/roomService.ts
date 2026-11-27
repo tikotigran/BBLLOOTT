@@ -195,6 +195,8 @@ export const cancelWaitingOnlineRoom = async (
   roomCode: string,
   callerUid?: string
 ): Promise<void> => {
+  if (!callerUid) return;
+
   const path = `rooms/${roomCode}`;
   const ref = doc(db, 'rooms', roomCode);
   try {
