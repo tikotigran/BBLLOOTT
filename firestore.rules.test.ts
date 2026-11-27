@@ -11,11 +11,16 @@ const SERVER_TOKEN = { serverTimestamp: true };
 
 test('Dirty Dozen security invariants & Firestore rule structure', () => {
   const rulesText = fs.readFileSync('firestore.rules', 'utf8');
+  const roomServiceText = fs.readFileSync('src/services/roomService.ts', 'utf8');
 
   // Verify default deny catch-all, email_verified gate, terminal lock, and Master Gate exist
   assert.ok(rulesText.includes('allow read, write: if false;'));
   assert.ok(rulesText.includes('request.auth.token.email_verified == true'));
   assert.ok(rulesText.includes("existing().status != 'finished'"));
+  assert.ok(rulesText.includes("existing().status == 'waiting'\n            && request.auth.uid == existing().hostUid\n            && incoming().status == 'finished'"));
+  assert.ok(rulesText.includes("incoming().diff(existing()).affectedKeys().hasOnly([\n              'status', 'updatedAt'\n            ])"));
+  assert.ok(rulesText.includes("allow delete: if isSignedIn() && isVerified() && isValidRoomCode(roomId)\n        && existing().status == 'waiting'\n        && existing().hostUid == request.auth.uid;"));
+  assert.ok(roomServiceText.includes("if (live.hostUid !== callerUid) return;\n        tx.delete(ref);"));
   assert.ok(rulesText.includes('getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.updatedAt == request.time'));
   assert.ok(!rulesText.includes('allow read: if isSignedIn();'));
 

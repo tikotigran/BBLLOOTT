@@ -8,6 +8,9 @@ interface LobbyViewProps {
   userProfile: UserProfile | null;
   isSignedIn: boolean;
   waitingRooms: OnlineRoomDoc[];
+  roomsError: string | null;
+  onRetryRooms: () => void;
+  roomAction: 'creating' | 'joining' | null;
   botsEnabled: boolean;
   initialJoinCode?: string;
   onUpdateSettings: (patch: Partial<GameState>) => void;
@@ -24,6 +27,9 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   userProfile,
   isSignedIn,
   waitingRooms,
+  roomsError,
+  onRetryRooms,
+  roomAction,
   botsEnabled,
   initialJoinCode = '',
   onUpdateSettings,
@@ -52,11 +58,11 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
 
   const handleJoinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!joinCode.trim()) return;
     onJoinOnlineByCode(joinCode);
   };
 
   const activeMode = botsEnabled ? createMode : 'friend';
+  const canPlayOnline = Boolean(isSignedIn && userProfile?.registrationComplete);
 
   return (
     <div className="flex-1 w-full bg-[#12141c] flex flex-col lg:flex-row overflow-hidden">
@@ -92,6 +98,22 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           mobileTab === 'rooms' ? 'flex' : 'hidden lg:flex'
         } flex-1 flex-col overflow-hidden border-b lg:border-b-0 lg:border-r border-white/10 min-h-0`}
       >
+        {roomsError && (
+          <div
+            role="alert"
+            className="flex items-center justify-between gap-3 px-3 sm:px-4 py-2 bg-rose-950/50 border-b border-rose-400/20 text-xs text-rose-100"
+          >
+            <span className="min-w-0 flex-1 leading-relaxed">{roomsError}</span>
+            <button
+              type="button"
+              onClick={onRetryRooms}
+              className="shrink-0 underline underline-offset-2 hover:text-white"
+            >
+              Повторить
+            </button>
+          </div>
+        )}
+
         {/* Online Friend Invite / Join Strip */}
         <div className="px-3 sm:px-4 py-2.5 bg-[#161923] border-b border-white/10 flex flex-wrap items-center justify-between gap-2 shrink-0">
           <form
@@ -110,9 +132,10 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             />
             <button
               type="submit"
-              className="px-3 py-1.5 rounded-md bg-[#23473c] hover:bg-[#2d5a4c] border border-emerald-500/40 text-emerald-300 text-xs font-bold uppercase tracking-wider cursor-pointer shrink-0"
+              disabled={roomAction !== null}
+              className="px-3 py-1.5 rounded-md bg-[#23473c] hover:bg-[#2d5a4c] border border-emerald-500/40 text-emerald-300 text-xs font-bold uppercase tracking-wider cursor-pointer shrink-0 disabled:opacity-60 disabled:cursor-wait"
             >
-              Войти
+              {roomAction === 'joining' ? 'Подключение…' : 'Войти'}
             </button>
           </form>
 
@@ -122,7 +145,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               onClick={onOpenAuth}
               className="text-[11px] font-semibold text-amber-300 hover:text-amber-200 underline underline-offset-2 cursor-pointer"
             >
-              Зарегистрируйте аккаунт для игры с другом
+              Войдите через Google и завершите регистрацию, чтобы играть с другом
             </button>
           )}
         </div>
@@ -144,11 +167,11 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
               <div className="bg-[#1a1d27] border border-white/10 rounded-xl p-5 text-center space-y-3">
                 <Users size={28} className="mx-auto text-slate-500" />
                 <p className="text-xs text-slate-300 leading-relaxed">
-                  {isSignedIn
-                    ? 'Открытых столов пока нет. Создайте стол — друг сразу увидит только его здесь.'
-                    : 'Войдите в аккаунт, чтобы видеть открытые столы друзей или создать свой стол.'}
+                  {canPlayOnline
+                    ? 'Открытых столов пока нет. Создайте стол и отправьте другу код. Оба игрока должны быть зарегистрированы.'
+                    : 'Войдите через Google и завершите регистрацию профиля, чтобы создавать столы и присоединяться к друзьям.'}
                 </p>
-                {!isSignedIn ? (
+                {!canPlayOnline ? (
                   <button
                     type="button"
                     onClick={onOpenAuth}
@@ -225,9 +248,10 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                       <button
                         type="button"
                         onClick={() => onJoinOnlineByCode(room.roomCode)}
-                        className="px-4 py-2 bg-[#23473c] hover:bg-[#2d5a4c] border border-emerald-500/40 text-emerald-300 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer shrink-0"
+                        disabled={roomAction !== null}
+                        className="px-4 py-2 bg-[#23473c] hover:bg-[#2d5a4c] border border-emerald-500/40 text-emerald-300 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer shrink-0 disabled:opacity-60 disabled:cursor-wait"
                       >
-                        ИГРАТЬ
+                        {roomAction === 'joining' ? 'Подключение…' : 'ИГРАТЬ'}
                       </button>
                     )}
                   </div>
@@ -262,11 +286,11 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                         Открытых столов пока нет
                       </div>
                       <p className="text-xs text-slate-400 leading-relaxed">
-                        {isSignedIn
-                          ? 'Создайте стол справа — как только он появится, ваш друг увидит здесь только ваш стол.'
-                          : 'Войдите в аккаунт, чтобы создать стол или увидеть открытый стол друга.'}
+                        {canPlayOnline
+                          ? 'Создайте стол справа и отправьте другу код. Присоединиться смогут только зарегистрированные игроки.'
+                          : 'Войдите через Google и завершите регистрацию профиля, чтобы создать стол или подключиться к другу.'}
                       </p>
-                      {!isSignedIn && (
+                      {!canPlayOnline && (
                         <button
                           type="button"
                           onClick={onOpenAuth}
@@ -327,9 +351,10 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                           <button
                             type="button"
                             onClick={() => onJoinOnlineByCode(room.roomCode)}
-                            className="px-4 py-1.5 bg-[#23473c] hover:bg-[#2d5a4c] border border-emerald-500/40 text-emerald-300 rounded text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer whitespace-nowrap"
+                            disabled={roomAction !== null}
+                            className="px-4 py-1.5 bg-[#23473c] hover:bg-[#2d5a4c] border border-emerald-500/40 text-emerald-300 rounded text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer whitespace-nowrap disabled:opacity-60 disabled:cursor-wait"
                           >
-                            ИГРАТЬ
+                            {roomAction === 'joining' ? 'Подключение…' : 'ИГРАТЬ'}
                           </button>
                         )}
                       </td>
@@ -516,9 +541,14 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           <button
             type="button"
             onClick={activeMode === 'ai' ? onCreateBotGame : onCreateOnlineGame}
-            className="w-full py-3 btn-vivaro text-xs uppercase tracking-widest cursor-pointer"
+            disabled={roomAction !== null}
+            className="w-full py-3 btn-vivaro text-xs uppercase tracking-widest cursor-pointer disabled:opacity-60 disabled:cursor-wait"
           >
-            {activeMode === 'ai' ? 'Создать стол с AI' : 'Создать стол'}
+            {roomAction === 'creating'
+              ? 'Создаём стол…'
+              : activeMode === 'ai'
+                ? 'Создать стол с AI'
+                : 'Создать стол'}
           </button>
         </div>
       </div>
