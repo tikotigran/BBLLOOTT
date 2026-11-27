@@ -20,8 +20,8 @@ service cloud.firestore {
 
     function isRecentServerTime(ts) {
       return ts is timestamp
-        && ts >= request.time - duration.value(5, 's')
-        && ts <= request.time + duration.value(5, 's');
+        && ts >= request.time - duration.value(60, 's')
+        && ts <= request.time + duration.value(60, 's');
     }
 
     function isValidId(id) {
@@ -42,6 +42,10 @@ service cloud.firestore {
 
     function isValidOptionalShortId(id) {
       return id is string && id.size() <= 12 && (id == '' || id.matches('^[0-9]{7}$'));
+    }
+
+    function isValidPasswordHash(h) {
+      return h is string && h.size() == 64 && h.matches('^[0-9a-f]{64}$');
     }
 
     function isValidCardMap(card) {
@@ -113,7 +117,7 @@ service cloud.firestore {
           'hostCanDeclare', 'guestCanDeclare',
           'hostCanShow', 'guestCanShow',
           'hostBlotDeclared', 'guestBlotDeclared',
-          'roundBreakdown', 'createdAt', 'updatedAt'
+          'roundBreakdown', 'passwordHash', 'joinPasswordHash', 'createdAt', 'updatedAt'
         ]);
     }
 
@@ -132,7 +136,9 @@ service cloud.firestore {
         && data.betAmount is number && data.betAmount >= 1000 && data.betAmount <= 100000
         && data.allowHighCombos is bool
         && data.allCombinationsDisabled is bool
-        && data.turnTimeLimit is number && data.turnTimeLimit in [15, 20, 30];
+        && data.turnTimeLimit is number && data.turnTimeLimit in [15, 20, 30]
+        && (!('passwordHash' in data) || isValidPasswordHash(data.passwordHash))
+        && (!('joinPasswordHash' in data) || isValidPasswordHash(data.joinPasswordHash));
     }
 
     function isValidGameRoomState(data) {
@@ -253,6 +259,9 @@ service cloud.firestore {
         && incoming().guestUid == ''
         && incoming().status == 'waiting'
         && incoming().winnerUid == ''
+        && 'passwordHash' in incoming()
+        && isValidPasswordHash(incoming().passwordHash)
+        && !('joinPasswordHash' in incoming())
         && incoming().createdAt == request.time
         && incoming().updatedAt == request.time;
       allow update: if isSignedIn() && isVerified() && isValidRoomCode(roomId)
@@ -267,18 +276,19 @@ service cloud.firestore {
         && incoming().allowHighCombos == existing().allowHighCombos
         && incoming().allCombinationsDisabled == existing().allCombinationsDisabled
         && incoming().turnTimeLimit == existing().turnTimeLimit
-        && !incoming().diff(existing()).affectedKeys().hasAny(['createdAt'])
+        && !incoming().diff(existing()).affectedKeys().hasAny(['createdAt', 'passwordHash'])
         && isRecentServerTime(incoming().updatedAt)
         && (
-          // Action 1: Guest joins a waiting room
+          // Action 1: Guest joins a waiting room (verifies password hash when set)
           (
             existing().status == 'waiting'
             && existing().guestUid == ''
             && request.auth.uid != existing().hostUid
             && incoming().guestUid == request.auth.uid
             && incoming().status == 'playing'
+            && (!('passwordHash' in existing()) || ('joinPasswordHash' in incoming() && incoming().joinPasswordHash == existing().passwordHash))
             && incoming().diff(existing()).affectedKeys().hasOnly([
-              'guestUid', 'guestName', 'guestShortId', 'status', 'updatedAt'
+              'guestUid', 'guestName', 'guestShortId', 'joinPasswordHash', 'status', 'updatedAt'
             ])
           )
           ||

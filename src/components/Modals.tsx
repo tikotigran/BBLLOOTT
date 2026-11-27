@@ -1,7 +1,8 @@
 import React from 'react';
 import { motion } from 'motion/react';
-import { Trophy, ArrowRight, X } from 'lucide-react';
+import { Trophy, ArrowRight, X, Lock } from 'lucide-react';
 import { GameState, Rank, TrumpType } from '../types';
+import { ROOM_PASSWORD_MAX } from '../utils/firestorePayloads';
 
 interface RoundResultModalProps {
   state: GameState;
@@ -380,6 +381,104 @@ export const RulesModal: React.FC<RulesModalProps> = ({ onClose }) => (
           Понятно
         </button>
       </div>
+    </div>
+  </div>
+);
+
+interface JoinPasswordModalProps {
+  roomCode: string;
+  hostName?: string;
+  password: string;
+  error: string | null;
+  isSubmitting: boolean;
+  onPasswordChange: (val: string) => void;
+  onSubmit: (e: React.FormEvent) => void;
+  onClose: () => void;
+}
+
+export const JoinPasswordModal: React.FC<JoinPasswordModalProps> = ({
+  roomCode,
+  hostName,
+  password,
+  error,
+  isSubmitting,
+  onPasswordChange,
+  onSubmit,
+  onClose,
+}) => (
+  <div
+    className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[300] flex items-center justify-center p-4"
+    role="dialog"
+    aria-modal="true"
+    aria-label={`Вход за стол ${roomCode}`}
+  >
+    <div className="bg-[#222632] border border-white/15 rounded-2xl shadow-2xl w-full max-w-sm p-6 text-slate-100">
+      <div className="flex items-center justify-between border-b border-white/10 pb-3 mb-4">
+        <div className="flex items-center gap-2.5">
+          <div className="w-9 h-9 rounded-xl bg-[#e91e63]/15 border border-[#e91e63]/40 flex items-center justify-center text-[#e91e63]">
+            <Lock size={17} />
+          </div>
+          <div>
+            <h2 className="text-base font-bold leading-tight">Вход за стол</h2>
+            <p className="text-xs text-slate-400">
+              Код: <span className="font-mono font-bold text-amber-400">{roomCode}</span>
+              {hostName ? ` · ${hostName}` : ''}
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Закрыть окно входа"
+          className="p-1.5 rounded-lg hover:bg-white/10 text-slate-400 hover:text-white cursor-pointer"
+        >
+          <X size={18} />
+        </button>
+      </div>
+
+      <form onSubmit={onSubmit} className="space-y-4">
+        <label className="flex flex-col gap-1.5">
+          <span className="text-xs font-semibold text-slate-300">
+            Пароль стола (спросите у друга)
+          </span>
+          <input
+            type="text"
+            autoFocus
+            autoComplete="off"
+            value={password}
+            onChange={(e) => onPasswordChange(e.target.value)}
+            maxLength={ROOM_PASSWORD_MAX}
+            placeholder="Введите пароль"
+            className="bg-[#151821] border border-white/15 rounded-lg px-3 py-2.5 text-sm font-mono text-white placeholder:text-slate-500 outline-none focus:border-[#e91e63]"
+          />
+        </label>
+
+        {error && (
+          <div
+            role="alert"
+            className="bg-rose-950/60 border border-rose-500/40 rounded-lg px-3 py-2 text-xs text-rose-200"
+          >
+            {error}
+          </div>
+        )}
+
+        <div className="flex gap-2.5 pt-1">
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex-1 py-2.5 bg-[#181b24] hover:bg-[#2a2f3d] border border-white/10 rounded-lg text-xs font-bold uppercase tracking-wider text-slate-300 cursor-pointer"
+          >
+            Отмена
+          </button>
+          <button
+            type="submit"
+            disabled={isSubmitting}
+            className="flex-1 py-2.5 btn-vivaro text-xs uppercase tracking-wider cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+          >
+            {isSubmitting ? 'Входим…' : 'Войти за стол'}
+          </button>
+        </div>
+      </form>
     </div>
   </div>
 );

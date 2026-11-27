@@ -1,7 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Layers, ZapOff, Users, Bot, KeyRound, Trash2 } from 'lucide-react';
+import { Layers, ZapOff, Users, Bot, KeyRound, Trash2, Lock } from 'lucide-react';
 import { GameState } from '../types';
-import { OnlineRoomDoc, UserProfile } from '../utils/firestorePayloads';
+import {
+  OnlineRoomDoc,
+  UserProfile,
+  ROOM_PASSWORD_MAX,
+  isValidRoomPassword,
+  sanitizeRoomPassword,
+} from '../utils/firestorePayloads';
 
 interface LobbyViewProps {
   state: GameState;
@@ -15,8 +21,11 @@ interface LobbyViewProps {
   initialJoinCode?: string;
   onUpdateSettings: (patch: Partial<GameState>) => void;
   onCreateBotGame: () => void;
-  onCreateOnlineGame: () => void;
-  onJoinOnlineByCode: (code: string) => void;
+  onCreateOnlineGame: (password: string) => void;
+  onJoinOnlineByCode: (
+    code: string,
+    options?: { hostName?: string; hasPassword?: boolean }
+  ) => void;
   onOpenOwnRoom: (code: string) => void;
   onCancelOwnRoom: (code: string) => void;
   onOpenAuth: () => void;
@@ -43,6 +52,8 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   const [mobileTab, setMobileTab] = useState<'rooms' | 'create'>('rooms');
   const [createMode, setCreateMode] = useState<'friend' | 'ai'>('friend');
   const [joinCode, setJoinCode] = useState(initialJoinCode);
+  const [roomPassword, setRoomPassword] = useState('');
+  const [passwordError, setPasswordError] = useState<string | null>(null);
 
   useEffect(() => {
     if (initialJoinCode) {
@@ -58,7 +69,16 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
 
   const handleJoinSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    onJoinOnlineByCode(joinCode);
+    onJoinOnlineByCode(joinCode, { hasPassword: true });
+  };
+
+  const handleCreateOnlineSubmit = () => {
+    if (!isValidRoomPassword(roomPassword)) {
+      setPasswordError('Введите пароль от 2 до 20 символов');
+      return;
+    }
+    setPasswordError(null);
+    onCreateOnlineGame(sanitizeRoomPassword(roomPassword));
   };
 
   const activeMode = botsEnabled ? createMode : 'friend';
@@ -247,11 +267,17 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                     ) : (
                       <button
                         type="button"
-                        onClick={() => onJoinOnlineByCode(room.roomCode)}
+                        onClick={() =>
+                          onJoinOnlineByCode(room.roomCode, {
+                            hostName: room.hostName,
+                            hasPassword: Boolean(room.passwordHash),
+                          })
+                        }
                         disabled={roomAction !== null}
-                        className="px-4 py-2 bg-[#23473c] hover:bg-[#2d5a4c] border border-emerald-500/40 text-emerald-300 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer shrink-0 disabled:opacity-60 disabled:cursor-wait"
+                        className="px-4 py-2 bg-[#23473c] hover:bg-[#2d5a4c] border border-emerald-500/40 text-emerald-300 rounded-lg text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer shrink-0 inline-flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-wait"
                       >
-                        {roomAction === 'joining' ? 'Подключение…' : 'ИГРАТЬ'}
+                        {room.passwordHash && <Lock size={12} />}
+                        <span>{roomAction === 'joining' ? 'Подключение…' : 'Войти'}</span>
                       </button>
                     )}
                   </div>
@@ -350,11 +376,17 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                         ) : (
                           <button
                             type="button"
-                            onClick={() => onJoinOnlineByCode(room.roomCode)}
+                            onClick={() =>
+                              onJoinOnlineByCode(room.roomCode, {
+                                hostName: room.hostName,
+                                hasPassword: Boolean(room.passwordHash),
+                              })
+                            }
                             disabled={roomAction !== null}
-                            className="px-4 py-1.5 bg-[#23473c] hover:bg-[#2d5a4c] border border-emerald-500/40 text-emerald-300 rounded text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer whitespace-nowrap disabled:opacity-60 disabled:cursor-wait"
+                            className="px-4 py-1.5 bg-[#23473c] hover:bg-[#2d5a4c] border border-emerald-500/40 text-emerald-300 rounded text-xs font-bold uppercase tracking-wider transition-colors cursor-pointer whitespace-nowrap inline-flex items-center gap-1.5 disabled:opacity-60 disabled:cursor-wait"
                           >
-                            {roomAction === 'joining' ? 'Подключение…' : 'ИГРАТЬ'}
+                            {room.passwordHash && <Lock size={12} />}
+                            <span>{roomAction === 'joining' ? 'Подключение…' : 'Войти'}</span>
                           </button>
                         )}
                       </td>
@@ -482,6 +514,34 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
             </select>
           </label>
 
+          {activeMode === 'friend' && (
+            <div className="pt-2 border-t border-white/10">
+              <label className="flex flex-col gap-1.5">
+                <span className="text-[11px] font-medium text-slate-300 flex items-center gap-1.5">
+                  <Lock size={12} className="text-[#e91e63]" />
+                  <span>Пароль стола (для друга)</span>
+                </span>
+                <input
+                  type="text"
+                  autoComplete="off"
+                  maxLength={ROOM_PASSWORD_MAX}
+                  value={roomPassword}
+                  onChange={(e) => {
+                    setRoomPassword(e.target.value);
+                    if (passwordError) setPasswordError(null);
+                  }}
+                  placeholder="Например, 1234"
+                  className="bg-[#12141c] border border-white/15 rounded-md px-2.5 py-2 text-xs font-mono text-white placeholder:text-slate-500 outline-none focus:border-[#e91e63]"
+                />
+              </label>
+              {passwordError && (
+                <p role="alert" className="text-[11px] text-rose-400 mt-1.5">
+                  {passwordError}
+                </p>
+              )}
+            </div>
+          )}
+
           {/* Combination Options */}
           <fieldset className="flex flex-col gap-2 pt-2 border-t border-white/10">
             <legend className="text-[11px] font-medium text-slate-400 mb-1">
@@ -540,7 +600,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
         <div className="p-3 sm:p-5 pt-2 border-t border-white/10 bg-[#181b24] shrink-0">
           <button
             type="button"
-            onClick={activeMode === 'ai' ? onCreateBotGame : onCreateOnlineGame}
+            onClick={activeMode === 'ai' ? onCreateBotGame : handleCreateOnlineSubmit}
             disabled={roomAction !== null}
             className="w-full py-3 btn-vivaro text-xs uppercase tracking-widest cursor-pointer disabled:opacity-60 disabled:cursor-wait"
           >

@@ -5,6 +5,9 @@ import {
   validateUserProfilePayload,
   validateHandPayload,
   ROOM_CODE_PATTERN,
+  PASSWORD_HASH_PATTERN,
+  isValidRoomPassword,
+  hashRoomPassword,
 } from './src/utils/firestorePayloads';
 
 const SERVER_TOKEN = { serverTimestamp: true };
@@ -23,7 +26,25 @@ test('Dirty Dozen security invariants & Firestore rule structure', () => {
   assert.ok(roomServiceText.includes("if (live.hostUid !== callerUid) return;\n        tx.delete(ref);"));
   assert.ok(rulesText.includes('isRecentServerTime(getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.updatedAt)'));
   assert.ok(rulesText.includes('isRecentServerTime(incoming().updatedAt)'));
+  assert.ok(rulesText.includes("!incoming().diff(existing()).affectedKeys().hasAny(['createdAt', 'passwordHash'])"));
+  assert.ok(rulesText.includes("'joinPasswordHash' in incoming() && incoming().joinPasswordHash == existing().passwordHash"));
   assert.ok(!rulesText.includes('allow read: if isSignedIn();'));
+
+  // Room password validation & deterministic SHA-256 hashing
+  assert.equal(isValidRoomPassword(''), false);
+  assert.equal(isValidRoomPassword('1'), false);
+  assert.equal(isValidRoomPassword('12'), true);
+  assert.equal(isValidRoomPassword('  1234  '), true);
+  assert.equal(isValidRoomPassword('a'.repeat(25)), true); // truncated to 20 chars
+
+  const hashA = hashRoomPassword('ab12cd', ' 1234 ');
+  const hashB = hashRoomPassword('AB12CD', '1234');
+  const hashOtherPw = hashRoomPassword('AB12CD', '5678');
+  const hashOtherRoom = hashRoomPassword('XY98ZW', '1234');
+  assert.equal(PASSWORD_HASH_PATTERN.test(hashA), true);
+  assert.equal(hashA, hashB);
+  assert.notEqual(hashA, hashOtherPw);
+  assert.notEqual(hashA, hashOtherRoom);
 
   // 1 & 2: Valid user profile vs Cross-user / Ghost field injection
   const validUser = {

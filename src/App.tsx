@@ -43,7 +43,13 @@ import {
   onlineForfeitRoom,
   RoomRole,
 } from './services/roomService';
-import { OnlineRoomDoc, UserProfile, sanitizeRoomCode } from './utils/firestorePayloads';
+import {
+  OnlineRoomDoc,
+  UserProfile,
+  isValidRoomPassword,
+  sanitizeRoomCode,
+  sanitizeRoomPassword,
+} from './utils/firestorePayloads';
 import Card from './components/Card';
 import TopBar from './components/TopBar';
 import MobileTopBar from './components/MobileTopBar';
@@ -53,7 +59,12 @@ import ScorePanel from './components/ScorePanel';
 import LobbyView from './components/LobbyView';
 import SettingsDrawer from './components/SettingsDrawer';
 import AuthModal from './components/AuthModal';
-import { RoundResultModal, GameOverModal, RulesModal } from './components/Modals';
+import {
+  RoundResultModal,
+  GameOverModal,
+  RulesModal,
+  JoinPasswordModal,
+} from './components/Modals';
 import { playCardSound, playChimeSound, setSoundMuted } from './utils/sound';
 import {
   DEFAULT_SETTINGS,
@@ -251,6 +262,35 @@ const getRoomErrorMessage = (error: unknown, fallback: string): string => {
   return message && message.length < 180 ? message : fallback;
 };
 
+const ROOM_PW_STORAGE_PREFIX = 'blot_room_pw_';
+
+const readStoredRoomPassword = (roomCode: string): string => {
+  if (typeof window === 'undefined' || !roomCode) return '';
+  try {
+    return window.localStorage.getItem(`${ROOM_PW_STORAGE_PREFIX}${roomCode}`) || '';
+  } catch {
+    return '';
+  }
+};
+
+const writeStoredRoomPassword = (roomCode: string, password: string): void => {
+  if (typeof window === 'undefined' || !roomCode) return;
+  try {
+    window.localStorage.setItem(`${ROOM_PW_STORAGE_PREFIX}${roomCode}`, password);
+  } catch {
+    // Ignore storage quota errors
+  }
+};
+
+const removeStoredRoomPassword = (roomCode: string): void => {
+  if (typeof window === 'undefined' || !roomCode) return;
+  try {
+    window.localStorage.removeItem(`${ROOM_PW_STORAGE_PREFIX}${roomCode}`);
+  } catch {
+    // Ignore storage errors
+  }
+};
+
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<'LOBBY' | 'GAME'>(() => {
     if (typeof window !== 'undefined') {
@@ -300,6 +340,10 @@ export default function App() {
     return '';
   });
   const [copiedInvite, setCopiedInvite] = useState(false);
+  const [hostRoomPasswords, setHostRoomPasswords] = useState<Record<string, string>>({});
+  const [joinModal, setJoinModal] = useState<{ roomCode: string; hostName?: string } | null>(null);
+  const [joinModalPassword, setJoinModalPassword] = useState('');
+  const [joinModalError, setJoinModalError] = useState<string | null>(null);
   const initializedRef = useRef(false);
   const recordedMatchRef = useRef<string | null>(null);
   const dealingRoomRef = useRef<string | null>(null);
@@ -437,7 +481,7 @@ export default function App() {
   const myRole: RoomRole =
     onlineRoom && firebaseUser && onlineRoom.guestUid === firebaseUser.uid ? 'guest' : 'host';
 
-  // Auto-join invited room from ?room=CODE once authenticated and registered
+  // Prompt for password (or re-open own room) for ?room=CODE once authenticated and registered
   useEffect(() => {
     if (!pendingInviteCode || !authReady) return;
     if (!firebaseUser || !userProfile?.registrationComplete) {
@@ -447,22 +491,24 @@ export default function App() {
     }
     const code = pendingInviteCode;
     setPendingInviteCode('');
-    setRoomAction('joining');
-    joinOnlineRoom(code, userProfile)
-      .then((joinedCode) => {
-        setOnlineRoomCode(joinedCode);
-        setCurrentScreen('GAME');
-        setAuthModalOpen(false);
-        const url = new URL(window.location.href);
-        url.searchParams.delete('room');
-        window.history.replaceState({}, '', url.toString());
-        showToast(`Вы подключились к столу ${joinedCode}`);
-      })
-      .catch((err) => {
-        showToast(getRoomErrorMessage(err, 'Не удалось войти в стол. Проверьте код и попробуйте снова.'));
-      })
-      .finally(() => setRoomAction(null));
-  }, [pendingInviteCode, authReady, firebaseUser, userProfile, showToast]);
+    setAuthModalOpen(false);
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('room');
+      window.history.replaceState({}, '', url.toString());
+    }
+    const own = waitingRooms.find(
+      (r) => r.roomCode === code && r.hostUid === firebaseUser.uid
+    );
+    if (own) {
+      setOnlineRoomCode(code);
+      setCurrentScreen('GAME');
+      return;
+    }
+    setJoinModal({ roomCode: code, hostName: waitingRooms.find((r) => r.roomCode === code)?.hostName });
+    setJoinModalPassword('');
+    setJoinModalError(null);
+  }, [pendingInviteCode, authReady, firebaseUser, userProfile, waitingRooms, showToast]);
 
   // Host deals Round 1 as soon as Guest joins
   useEffect(() => {
@@ -1809,6 +1855,7 @@ export default function App() {
     exitGameImmersiveMode();
     if (isOnline && onlineRoom) {
       if (onlineRoom.status === 'waiting' && myRole === 'host') {
+        removeStoredRoomPassword(onlineRoom.roomCode);
         void cancelWaitingOnlineRoom(onlineRoom.roomCode, firebaseUser?.uid).catch((err) =>
           showToast(getRoomErrorMessage(err, 'Не удалось закрыть стол.'))
         );
@@ -1821,6 +1868,7 @@ export default function App() {
       setOnlineRoom(null);
       setOnlineHand([]);
     } else if (onlineRoomCode) {
+      removeStoredRoomPassword(onlineRoomCode);
       void cancelWaitingOnlineRoom(onlineRoomCode, firebaseUser?.uid).catch((err) =>
         showToast(getRoomErrorMessage(err, 'Не удалось закрыть стол.'))
       );
@@ -1854,6 +1902,7 @@ export default function App() {
   const handleCancelOwnRoom = async (code: string) => {
     try {
       await cancelWaitingOnlineRoom(code, firebaseUser?.uid);
+      removeStoredRoomPassword(code);
       if (onlineRoomCode === code) {
         setOnlineRoomCode(null);
         setOnlineRoom(null);
@@ -1865,13 +1914,18 @@ export default function App() {
     }
   };
 
-  const handleCreateOnlineGame = async () => {
+  const handleCreateOnlineGame = async (rawPassword: string) => {
     if (roomAction) return;
+    if (!isValidRoomPassword(rawPassword)) {
+      showToast('Введите пароль стола (от 2 до 20 символов)');
+      return;
+    }
     if (!firebaseUser || !userProfile?.registrationComplete) {
       setAuthModalOpen(true);
       showToast('Войдите через Google и завершите регистрацию профиля, чтобы создать стол');
       return;
     }
+    const cleanPassword = sanitizeRoomPassword(rawPassword);
     setRoomAction('creating');
     try {
       const code = await createOnlineRoom(userProfile, {
@@ -1880,7 +1934,10 @@ export default function App() {
         allowHighCombos: state.allowHighCombos,
         allCombinationsDisabled: state.allCombinationsDisabled,
         turnTimeLimit: state.turnTimeLimit,
+        password: cleanPassword,
       });
+      writeStoredRoomPassword(code, cleanPassword);
+      setHostRoomPasswords((prev) => ({ ...prev, [code]: cleanPassword }));
       enterGameImmersiveMode();
       setOnlineRoomCode(code);
       setCurrentScreen('GAME');
@@ -1893,11 +1950,38 @@ export default function App() {
     }
   };
 
-  const handleJoinOnlineByCode = async (rawCode: string) => {
+  const executeJoinOnlineRoom = async (code: string, password?: string) => {
+    if (!userProfile) return;
+    setRoomAction('joining');
+    try {
+      const joinedCode = await joinOnlineRoom(code, userProfile, password);
+      setJoinModal(null);
+      setJoinModalPassword('');
+      setJoinModalError(null);
+      enterGameImmersiveMode();
+      setOnlineRoomCode(joinedCode);
+      setCurrentScreen('GAME');
+      showToast(`Подключено к столу ${joinedCode}`);
+    } catch (err) {
+      const errMsg = getRoomErrorMessage(err, 'Не удалось войти в стол. Проверьте данные и попробуйте снова.');
+      if (joinModal) {
+        setJoinModalError(errMsg);
+      } else {
+        showToast(errMsg);
+      }
+    } finally {
+      setRoomAction(null);
+    }
+  };
+
+  const handleJoinOnlineByCode = (
+    rawCode: string,
+    options?: { hostName?: string; hasPassword?: boolean }
+  ) => {
     if (roomAction) return;
     const clean = sanitizeRoomCode(rawCode);
-    if (!clean) {
-      showToast('Введите код стола друга.');
+    if (clean.length < 4) {
+      showToast('Введите код стола друга (минимум 4 символа).');
       return;
     }
     if (!firebaseUser || !userProfile?.registrationComplete) {
@@ -1906,15 +1990,46 @@ export default function App() {
       showToast('Войдите через Google и завершите регистрацию, чтобы присоединиться');
       return;
     }
+    const matchedRoom = waitingRooms.find((r) => r.roomCode === clean);
+    if (matchedRoom && matchedRoom.hostUid === firebaseUser.uid) {
+      handleOpenOwnRoom(clean);
+      return;
+    }
+    if (matchedRoom && !matchedRoom.passwordHash && options?.hasPassword !== true) {
+      void executeJoinOnlineRoom(clean);
+      return;
+    }
+    setJoinModal({
+      roomCode: clean,
+      hostName: options?.hostName || matchedRoom?.hostName,
+    });
+    setJoinModalPassword('');
+    setJoinModalError(null);
+  };
+
+  const handleSubmitJoinPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!joinModal || roomAction || !userProfile) return;
+    const cleanPassword = sanitizeRoomPassword(joinModalPassword);
+    if (!cleanPassword) {
+      setJoinModalError('Введите пароль стола');
+      return;
+    }
     setRoomAction('joining');
+    setJoinModalError(null);
     try {
-      const code = await joinOnlineRoom(clean, userProfile);
+      const joinedCode = await joinOnlineRoom(joinModal.roomCode, userProfile, cleanPassword);
+      setJoinModal(null);
+      setJoinModalPassword('');
+      setJoinModalError(null);
       enterGameImmersiveMode();
-      setOnlineRoomCode(code);
+      setOnlineRoomCode(joinedCode);
       setCurrentScreen('GAME');
-      showToast(`Подключено к столу ${code}`);
+      showToast(`Подключено к столу ${joinedCode}`);
     } catch (err) {
-      showToast(getRoomErrorMessage(err, 'Не удалось войти в стол. Проверьте код и попробуйте снова.'));
+      setJoinModalError(
+        getRoomErrorMessage(err, 'Неверный пароль или не удалось войти в стол.')
+      );
     } finally {
       setRoomAction(null);
     }
@@ -1998,8 +2113,8 @@ export default function App() {
           initialJoinCode={pendingInviteCode}
           onUpdateSettings={(patch) => setState((prev) => ({ ...prev, ...patch }))}
           onCreateBotGame={handleCreateGame}
-          onCreateOnlineGame={() => void handleCreateOnlineGame()}
-          onJoinOnlineByCode={(code) => void handleJoinOnlineByCode(code)}
+          onCreateOnlineGame={(password) => void handleCreateOnlineGame(password)}
+          onJoinOnlineByCode={(code, options) => handleJoinOnlineByCode(code, options)}
           onOpenOwnRoom={handleOpenOwnRoom}
           onCancelOwnRoom={(code) => void handleCancelOwnRoom(code)}
           onOpenAuth={() => setAuthModalOpen(true)}
@@ -3171,70 +3286,87 @@ export default function App() {
       {/* Online Room Loading / Waiting Overlay */}
       {currentScreen === 'GAME' &&
         onlineRoomCode &&
-        (!onlineRoom || onlineRoom.status === 'waiting') && (
-          <div
-            className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[190] flex items-center justify-center p-4"
-            role="dialog"
-            aria-modal="true"
-            aria-label="Ожидание друга"
-          >
-            <div className="bg-[#222632] border border-white/15 rounded-2xl shadow-2xl w-full max-w-md p-6 text-slate-100 text-center">
-              <div className="w-12 h-12 rounded-2xl bg-[#e91e63]/15 border border-[#e91e63]/40 flex items-center justify-center mx-auto mb-3 text-[#e91e63]">
-                <Users size={24} />
-              </div>
-              <h2 className="text-xl font-bold mb-1">Ожидание друга</h2>
-              {onlineRoom ? (
-                <>
-                  <p className="text-xs text-slate-400 mb-4">
-                    Отправьте этот код или ссылку другу — как только он войдёт, начнётся раздача.
+        (!onlineRoom || onlineRoom.status === 'waiting') && (() => {
+          const activeRoomPassword = onlineRoom
+            ? hostRoomPasswords[onlineRoom.roomCode] ||
+              readStoredRoomPassword(onlineRoom.roomCode)
+            : hostRoomPasswords[onlineRoomCode] ||
+              readStoredRoomPassword(onlineRoomCode);
+          return (
+            <div
+              className="fixed inset-0 bg-black/75 backdrop-blur-sm z-[190] flex items-center justify-center p-4"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Ожидание друга"
+            >
+              <div className="bg-[#222632] border border-white/15 rounded-2xl shadow-2xl w-full max-w-md p-6 text-slate-100 text-center">
+                <div className="w-12 h-12 rounded-2xl bg-[#e91e63]/15 border border-[#e91e63]/40 flex items-center justify-center mx-auto mb-3 text-[#e91e63]">
+                  <Users size={24} />
+                </div>
+                <h2 className="text-xl font-bold mb-1">Ожидание друга</h2>
+                {onlineRoom ? (
+                  <>
+                    <p className="text-xs text-slate-400 mb-4">
+                      Скажите другу код и пароль стола — когда он нажмёт «Войти» и введёт пароль, начнётся игра.
+                    </p>
+                    <div className="grid grid-cols-2 gap-2.5 mb-3">
+                      <div className="bg-[#181b24] border border-white/10 rounded-xl px-3 py-3">
+                        <div className="text-[11px] uppercase tracking-wider text-slate-500 font-bold mb-1">
+                          Код стола
+                        </div>
+                        <div className="text-xl font-mono font-extrabold tracking-[0.18em] text-amber-400 select-all">
+                          {onlineRoom.roomCode}
+                        </div>
+                      </div>
+                      <div className="bg-[#181b24] border border-white/10 rounded-xl px-3 py-3">
+                        <div className="text-[11px] uppercase tracking-wider text-slate-500 font-bold mb-1">
+                          Пароль стола
+                        </div>
+                        <div className="text-xl font-mono font-extrabold text-emerald-400 select-all truncate">
+                          {activeRoomPassword || 'Задан'}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2 mb-5">
+                      <input
+                        type="text"
+                        readOnly
+                        aria-label="Ссылка приглашения"
+                        value={
+                          typeof window !== 'undefined'
+                            ? `${window.location.origin}/?room=${onlineRoom.roomCode}`
+                            : ''
+                        }
+                        className="flex-1 bg-[#181b24] border border-white/10 rounded-lg px-3 py-2 text-xs text-slate-300 font-mono truncate"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => void handleCopyInvite()}
+                        className="btn-vivaro px-3.5 py-2 text-xs flex items-center gap-1.5 cursor-pointer shrink-0"
+                      >
+                        {copiedInvite ? <Check size={14} /> : <Copy size={14} />}
+                        <span>{copiedInvite ? 'Готово' : 'Копировать'}</span>
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-xs text-slate-400 mb-5 flex items-center justify-center gap-2">
+                    <span className="w-4 h-4 border-2 border-[#e91e63] border-t-transparent rounded-full animate-spin" />
+                    <span>Подключение к столу...</span>
                   </p>
-                  <div className="bg-[#181b24] border border-white/10 rounded-xl px-4 py-3 mb-3">
-                    <div className="text-[11px] uppercase tracking-wider text-slate-500 font-bold mb-1">
-                      Код стола
-                    </div>
-                    <div className="text-2xl font-mono font-extrabold tracking-[0.25em] text-amber-400 select-all">
-                      {onlineRoom.roomCode}
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2 mb-5">
-                    <input
-                      type="text"
-                      readOnly
-                      aria-label="Ссылка приглашения"
-                      value={
-                        typeof window !== 'undefined'
-                          ? `${window.location.origin}/?room=${onlineRoom.roomCode}`
-                          : ''
-                      }
-                      className="flex-1 bg-[#181b24] border border-white/10 rounded-lg px-3 py-2 text-xs text-slate-300 font-mono truncate"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => void handleCopyInvite()}
-                      className="btn-vivaro px-3.5 py-2 text-xs flex items-center gap-1.5 cursor-pointer shrink-0"
-                    >
-                      {copiedInvite ? <Check size={14} /> : <Copy size={14} />}
-                      <span>{copiedInvite ? 'Готово' : 'Копировать'}</span>
-                    </button>
-                  </div>
-                </>
-              ) : (
-                <p className="text-xs text-slate-400 mb-5 flex items-center justify-center gap-2">
-                  <span className="w-4 h-4 border-2 border-[#e91e63] border-t-transparent rounded-full animate-spin" />
-                  <span>Подключение к столу...</span>
-                </p>
-              )}
+                )}
 
-              <button
-                type="button"
-                onClick={handleGoLobby}
-                className="w-full py-2.5 bg-[#2e3445] hover:bg-[#3a4156] border border-white/10 rounded-lg text-xs font-bold uppercase tracking-wider text-slate-200 cursor-pointer"
-              >
-                Отменить и выйти в лобби
-              </button>
+                <button
+                  type="button"
+                  onClick={handleGoLobby}
+                  className="w-full py-2.5 bg-[#2e3445] hover:bg-[#3a4156] border border-white/10 rounded-lg text-xs font-bold uppercase tracking-wider text-slate-200 cursor-pointer"
+                >
+                  Отменить и выйти в лобби
+                </button>
+              </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
       {/* Modals */}
       {currentScreen === 'GAME' &&
@@ -3257,9 +3389,7 @@ export default function App() {
           playerLabel={playerLabel}
           opponentLabel={opponentLabel}
           isOnline={isOnline}
-          onPlayAgain={
-            isOnline ? () => void handleCreateOnlineGame() : () => startNewRound()
-          }
+          onPlayAgain={isOnline ? handleGoLobby : () => startNewRound()}
           onExitLobby={handleGoLobby}
         />
       )}
@@ -3274,6 +3404,27 @@ export default function App() {
           onChange={(patch) => setSettings((prev) => ({ ...prev, ...patch }))}
           onReset={() => setSettings({ ...DEFAULT_SETTINGS })}
           onClose={() => setSettingsOpen(false)}
+        />
+      )}
+
+      {joinModal && (
+        <JoinPasswordModal
+          roomCode={joinModal.roomCode}
+          hostName={joinModal.hostName}
+          password={joinModalPassword}
+          error={joinModalError}
+          isSubmitting={roomAction === 'joining'}
+          onPasswordChange={(val) => {
+            setJoinModalPassword(val);
+            if (joinModalError) setJoinModalError(null);
+          }}
+          onSubmit={(e) => void handleSubmitJoinPassword(e)}
+          onClose={() => {
+            if (roomAction === 'joining') return;
+            setJoinModal(null);
+            setJoinModalPassword('');
+            setJoinModalError(null);
+          }}
         />
       )}
 

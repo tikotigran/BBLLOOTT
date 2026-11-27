@@ -238,6 +238,16 @@
         "roundBreakdown": {
           "type": "object"
         },
+        "passwordHash": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "joinPasswordHash": {
+          "type": "string",
+          "maxLength": 64,
+          "pattern": "^[0-9a-f]{64}$"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"
