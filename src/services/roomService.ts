@@ -231,7 +231,8 @@ export const cancelWaitingOnlineRoom = async (
 
 export const subscribeOnlineRoom = (
   roomCode: string,
-  onData: (room: OnlineRoomDoc | null) => void
+  onData: (room: OnlineRoomDoc | null) => void,
+  onError?: (error: unknown) => void
 ): Unsubscribe => {
   const path = `rooms/${roomCode}`;
   const ref = doc(db, 'rooms', roomCode);
@@ -241,13 +242,18 @@ export const subscribeOnlineRoom = (
       onData(snap.exists() ? (snap.data() as OnlineRoomDoc) : null);
     },
     (error) => {
+      if (onError) {
+        onError(error);
+        return;
+      }
       handleFirestoreError(error, OperationType.GET, path);
     }
   );
 };
 
 export const subscribeWaitingOnlineRooms = (
-  onData: (rooms: OnlineRoomDoc[]) => void
+  onData: (rooms: OnlineRoomDoc[]) => void,
+  onError?: (error: unknown) => void
 ): Unsubscribe => {
   const path = 'rooms';
   const q = query(
@@ -267,6 +273,10 @@ export const subscribeWaitingOnlineRooms = (
       onData(list);
     },
     (error) => {
+      if (onError) {
+        onError(error);
+        return;
+      }
       handleFirestoreError(error, OperationType.LIST, path);
     }
   );
@@ -275,7 +285,8 @@ export const subscribeWaitingOnlineRooms = (
 export const subscribeMyOnlineHand = (
   roomCode: string,
   uid: string,
-  onData: (cards: Card[]) => void
+  onData: (cards: Card[]) => void,
+  onError?: (error: unknown) => void
 ): Unsubscribe => {
   const path = `rooms/${roomCode}/hands/${uid}`;
   const ref = doc(db, 'rooms', roomCode, 'hands', uid);
@@ -290,6 +301,10 @@ export const subscribeMyOnlineHand = (
       onData(sortCards(data.cards || []));
     },
     (error) => {
+      if (onError) {
+        onError(error);
+        return;
+      }
       handleFirestoreError(error, OperationType.GET, path);
     }
   );

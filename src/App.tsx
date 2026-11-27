@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { Copy, Check, Users } from 'lucide-react';
+import { Copy, Check, Menu, Users } from 'lucide-react';
 import {
   Card as CardType,
   GameState,
@@ -203,6 +203,37 @@ const suitGlyph = (suit: Suit | TrumpType) => {
   }
 };
 
+const getRoomErrorMessage = (error: unknown, fallback: string): string => {
+  const errorRecord =
+    typeof error === 'object' && error !== null
+      ? (error as { code?: unknown; message?: unknown })
+      : null;
+  const code = typeof errorRecord?.code === 'string' ? errorRecord.code : '';
+  let message =
+    typeof errorRecord?.message === 'string'
+      ? errorRecord.message
+      : typeof error === 'string'
+        ? error
+        : '';
+
+  try {
+    const details = JSON.parse(message) as { error?: unknown };
+    if (typeof details.error === 'string') message = details.error;
+  } catch {
+    // Firebase errors can also arrive as plain messages.
+  }
+
+  const details = `${code} ${message}`.toLowerCase();
+  if (details.includes('permission-denied') || details.includes('missing or insufficient permissions')) {
+    return 'Нет доступа к столу. Оба игрока должны войти через Google и завершить регистрацию профиля. Проверьте подтверждение аккаунта Google.';
+  }
+  if (details.includes('unavailable') || details.includes('offline') || details.includes('network')) {
+    return 'Не удалось связаться с сервером. Проверьте интернет и попробуйте ещё раз.';
+  }
+
+  return message && message.length < 180 ? message : fallback;
+};
+
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<'LOBBY' | 'GAME'>(() => {
     if (typeof window !== 'undefined') {
@@ -225,12 +256,22 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
   const [settings, setSettings] = useState<TableSettings>(() => loadSettings());
-  const [isMobile, setIsMobile] = useState(false);
-  const [isNarrowPortrait, setIsNarrowPortrait] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth < 768 || (window.innerHeight <= 500 && window.innerWidth < 980);
+  });
+  const [isNarrowPortrait, setIsNarrowPortrait] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    return window.innerWidth < 520;
+  });
+  const [mobileTopBarVisible, setMobileTopBarVisible] = useState(false);
   const [firebaseUser, setFirebaseUser] = useState<FirebaseUser | null>(null);
   const [authReady, setAuthReady] = useState(false);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [waitingRooms, setWaitingRooms] = useState<OnlineRoomDoc[]>([]);
+  const [roomListError, setRoomListError] = useState<string | null>(null);
+  const [roomListVersion, setRoomListVersion] = useState(0);
+  const [roomAction, setRoomAction] = useState<'creating' | 'joining' | null>(null);
   const [onlineRoomCode, setOnlineRoomCode] = useState<string | null>(null);
   const [onlineRoom, setOnlineRoom] = useState<OnlineRoomDoc | null>(null);
   const [onlineHand, setOnlineHand] = useState<CardType[]>([]);
@@ -260,8 +301,51 @@ export default function App() {
     setToast({ id, text });
     setTimeout(() => {
       setToast((curr) => (curr?.id === id ? null : curr));
-    }, 2400);
+    }, 5000);
   }, []);
+
+  const enterGameImmersiveMode = useCallback(() => {
+    setMobileTopBarVisible(false);
+    if (!isMobile) return;
+
+    const isInstalledApp =
+      window.matchMedia('(display-mode: fullscreen), (display-mode: standalone)').matches ||
+      (navigator as Navigator & { standalone?: boolean }).standalone === true;
+    const orientation = (window.screen as Screen & {
+      orientation?: ScreenOrientation & {
+        lock?: (orientation: 'landscape') => Promise<void>;
+      };
+    }).orientation;
+    const lockLandscape = () =>
+      orientation?.lock?.('landscape').catch(() => undefined);
+
+    if (!isInstalledApp && !document.fullscreenElement) {
+      void document.documentElement
+        .requestFullscreen({ navigationUI: 'hide' })
+        .catch(() => undefined)
+        .then(lockLandscape);
+      return;
+    }
+
+    void lockLandscape();
+  }, [isMobile]);
+
+  const exitGameImmersiveMode = useCallback(() => {
+    setMobileTopBarVisible(true);
+    if (document.fullscreenElement) {
+      void document.exitFullscreen().catch(() => undefined);
+    }
+    const orientation = (window.screen as Screen & {
+      orientation?: ScreenOrientation & { unlock?: () => void };
+    }).orientation;
+    orientation?.unlock?.();
+  }, []);
+
+  useEffect(() => {
+    if (!isMobile || currentScreen !== 'GAME' || !mobileTopBarVisible) return;
+    const timeoutId = window.setTimeout(() => setMobileTopBarVisible(false), 10000);
+    return () => window.clearTimeout(timeoutId);
+  }, [currentScreen, isMobile, mobileTopBarVisible]);
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (user) => {
@@ -285,13 +369,22 @@ export default function App() {
   useEffect(() => {
     if (!authReady || !firebaseUser) {
       setWaitingRooms([]);
+      setRoomListError(null);
       return;
     }
-    const unsub = subscribeWaitingOnlineRooms((rooms) => {
-      setWaitingRooms(rooms);
-    });
+    const unsub = subscribeWaitingOnlineRooms(
+      (rooms) => {
+        setWaitingRooms(rooms);
+        setRoomListError(null);
+      },
+      (error) => {
+        setRoomListError(
+          getRoomErrorMessage(error, 'Не удалось загрузить список столов. Попробуйте ещё раз.')
+        );
+      }
+    );
     return () => unsub();
-  }, [authReady, firebaseUser]);
+  }, [authReady, firebaseUser, roomListVersion]);
 
   useEffect(() => {
     if (!authReady || !firebaseUser || !onlineRoomCode) {
@@ -299,17 +392,27 @@ export default function App() {
       setOnlineHand([]);
       return;
     }
-    const unsubRoom = subscribeOnlineRoom(onlineRoomCode, (room) => {
-      setOnlineRoom(room);
-    });
-    const unsubHand = subscribeMyOnlineHand(onlineRoomCode, firebaseUser.uid, (cards) => {
-      setOnlineHand(cards);
-    });
+    const reportRoomError = (error: unknown) => {
+      showToast(getRoomErrorMessage(error, 'Не удалось загрузить игровой стол.'));
+    };
+    const unsubRoom = subscribeOnlineRoom(
+      onlineRoomCode,
+      (room) => {
+        setOnlineRoom(room);
+      },
+      reportRoomError
+    );
+    const unsubHand = subscribeMyOnlineHand(
+      onlineRoomCode,
+      firebaseUser.uid,
+      (cards) => setOnlineHand(cards),
+      reportRoomError
+    );
     return () => {
       unsubRoom();
       unsubHand();
     };
-  }, [authReady, firebaseUser, onlineRoomCode]);
+  }, [authReady, firebaseUser, onlineRoomCode, showToast]);
 
   const isOnline = Boolean(onlineRoomCode && onlineRoom);
   const myRole: RoomRole =
@@ -325,6 +428,7 @@ export default function App() {
     }
     const code = pendingInviteCode;
     setPendingInviteCode('');
+    setRoomAction('joining');
     joinOnlineRoom(code, userProfile)
       .then((joinedCode) => {
         setOnlineRoomCode(joinedCode);
@@ -336,8 +440,9 @@ export default function App() {
         showToast(`Вы подключились к столу ${joinedCode}`);
       })
       .catch((err) => {
-        showToast(err instanceof Error ? err.message : 'Не удалось войти в стол');
-      });
+        showToast(getRoomErrorMessage(err, 'Не удалось войти в стол. Проверьте код и попробуйте снова.'));
+      })
+      .finally(() => setRoomAction(null));
   }, [pendingInviteCode, authReady, firebaseUser, userProfile, showToast]);
 
   // Host deals Round 1 as soon as Guest joins
@@ -1656,6 +1761,7 @@ export default function App() {
     activeState.canShow.player;
 
   const handleGoLobby = useCallback(() => {
+    exitGameImmersiveMode();
     if (isOnline && onlineRoom) {
       if (onlineRoom.status === 'waiting' && myRole === 'host') {
         void cancelWaitingOnlineRoom(onlineRoom.roomCode, firebaseUser?.uid);
@@ -1672,13 +1778,14 @@ export default function App() {
       setOnlineHand([]);
     }
     setCurrentScreen('LOBBY');
-  }, [isOnline, onlineRoom, onlineRoomCode, myRole, firebaseUser?.uid]);
+  }, [isOnline, onlineRoom, onlineRoomCode, myRole, firebaseUser?.uid, exitGameImmersiveMode]);
 
   const handleCreateGame = () => {
     if (!settings.botsEnabled) {
       showToast('Боты отключены в настройках');
       return;
     }
+    enterGameImmersiveMode();
     setOnlineRoomCode(null);
     setCurrentScreen('GAME');
     startNewRound({
@@ -1687,6 +1794,7 @@ export default function App() {
   };
 
   const handleOpenOwnRoom = (code: string) => {
+    enterGameImmersiveMode();
     setOnlineRoomCode(code);
     setCurrentScreen('GAME');
     setCopiedInvite(false);
@@ -1707,11 +1815,14 @@ export default function App() {
   };
 
   const handleCreateOnlineGame = async () => {
+    if (roomAction) return;
     if (!firebaseUser || !userProfile?.registrationComplete) {
       setAuthModalOpen(true);
-      showToast('Сначала войдите и зарегистрируйте профиль');
+      showToast('Войдите через Google и завершите регистрацию профиля, чтобы создать стол');
       return;
     }
+    enterGameImmersiveMode();
+    setRoomAction('creating');
     try {
       const code = await createOnlineRoom(userProfile, {
         gameLimit: state.gameLimit,
@@ -1723,27 +1834,38 @@ export default function App() {
       setOnlineRoomCode(code);
       setCurrentScreen('GAME');
       setCopiedInvite(false);
+      setRoomListError(null);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Ошибка создания стола');
+      showToast(getRoomErrorMessage(err, 'Не удалось создать стол. Проверьте подключение и попробуйте снова.'));
+    } finally {
+      setRoomAction(null);
     }
   };
 
   const handleJoinOnlineByCode = async (rawCode: string) => {
+    if (roomAction) return;
     const clean = sanitizeRoomCode(rawCode);
-    if (!clean) return;
+    if (!clean) {
+      showToast('Введите код стола друга.');
+      return;
+    }
     if (!firebaseUser || !userProfile?.registrationComplete) {
       setPendingInviteCode(clean);
       setAuthModalOpen(true);
-      showToast('Войдите и зарегистрируйтесь, чтобы присоединиться');
+      showToast('Войдите через Google и завершите регистрацию, чтобы присоединиться');
       return;
     }
+    enterGameImmersiveMode();
+    setRoomAction('joining');
     try {
       const code = await joinOnlineRoom(clean, userProfile);
       setOnlineRoomCode(code);
       setCurrentScreen('GAME');
       showToast(`Подключено к столу ${code}`);
     } catch (err) {
-      showToast(err instanceof Error ? err.message : 'Не удалось войти в стол');
+      showToast(getRoomErrorMessage(err, 'Не удалось войти в стол. Проверьте код и попробуйте снова.'));
+    } finally {
+      setRoomAction(null);
     }
   };
 
@@ -1763,24 +1885,35 @@ export default function App() {
   return (
     <div className="w-screen h-[100dvh] flex flex-col overflow-hidden bg-[#181b24] text-slate-100 font-sans">
       {isMobile && currentScreen === 'GAME' ? (
-        <MobileTopBar
-          tableId={activeState.tableId}
-          gameLimit={activeState.gameLimit}
-          betAmount={activeState.betAmount}
-          roundNumber={activeState.roundNumber}
-          playerTricksWon={playerTricksWon}
-          aiTricksWon={aiTricksWon}
-          playerLabel={playerShortLabel}
-          opponentLabel={opponentLabel}
-          accountBalance={userProfile?.balance ?? null}
-          isMuted={isMuted}
-          onToggleMute={handleToggleMute}
-          onGoLobby={handleGoLobby}
-          onNewRound={() => startNewRound()}
-          onOpenRules={() => setRulesOpen(true)}
-          onOpenSettings={() => setSettingsOpen(true)}
-          onOpenAuth={() => setAuthModalOpen(true)}
-        />
+        mobileTopBarVisible ? (
+          <MobileTopBar
+            tableId={activeState.tableId}
+            gameLimit={activeState.gameLimit}
+            betAmount={activeState.betAmount}
+            roundNumber={activeState.roundNumber}
+            playerTricksWon={playerTricksWon}
+            aiTricksWon={aiTricksWon}
+            playerLabel={playerShortLabel}
+            opponentLabel={opponentLabel}
+            accountBalance={userProfile?.balance ?? null}
+            isMuted={isMuted}
+            onToggleMute={handleToggleMute}
+            onGoLobby={handleGoLobby}
+            onNewRound={() => startNewRound()}
+            onOpenRules={() => setRulesOpen(true)}
+            onOpenSettings={() => setSettingsOpen(true)}
+            onOpenAuth={() => setAuthModalOpen(true)}
+          />
+        ) : (
+          <button
+            type="button"
+            aria-label="Показать меню игры"
+            onClick={() => setMobileTopBarVisible(true)}
+            className="fixed top-2 left-2 z-[60] rounded-full border border-white/20 bg-[#151821]/85 p-2 text-slate-200 shadow-lg backdrop-blur-sm"
+          >
+            <Menu size={18} />
+          </button>
+        )
       ) : (
         <TopBar
           currentScreen={currentScreen}
@@ -1790,7 +1923,10 @@ export default function App() {
           isSignedIn={Boolean(firebaseUser)}
           onToggleMute={handleToggleMute}
           onGoLobby={handleGoLobby}
-          onEnterGame={() => setCurrentScreen('GAME')}
+          onEnterGame={() => {
+            enterGameImmersiveMode();
+            setCurrentScreen('GAME');
+          }}
           onNewRound={() => startNewRound()}
           onOpenRules={() => setRulesOpen(true)}
           onOpenSettings={() => setSettingsOpen(true)}
@@ -1804,6 +1940,9 @@ export default function App() {
           userProfile={userProfile}
           isSignedIn={Boolean(firebaseUser)}
           waitingRooms={waitingRooms}
+          roomsError={roomListError}
+          onRetryRooms={() => setRoomListVersion((version) => version + 1)}
+          roomAction={roomAction}
           botsEnabled={settings.botsEnabled}
           initialJoinCode={pendingInviteCode}
           onUpdateSettings={(patch) => setState((prev) => ({ ...prev, ...patch }))}
@@ -1879,22 +2018,6 @@ export default function App() {
                 </span>
               )}
             </div>
-
-            {/* Subtle Toast */}
-            <AnimatePresence>
-              {toast && (
-                <motion.div
-                  key={toast.id}
-                  initial={{ opacity: 0, y: -8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -8 }}
-                  transition={{ duration: 0.16 }}
-                  className="absolute top-14 left-1/2 -translate-x-1/2 z-[160] bg-[#1b1f2a]/90 border border-white/15 px-3 py-1 rounded-full text-[11px] font-semibold text-slate-100 shadow-lg pointer-events-none whitespace-nowrap"
-                >
-                  {toast.text}
-                </motion.div>
-              )}
-            </AnimatePresence>
 
             {/* AI Fanned Hand (tucked at top edge like mobile reference) */}
             <div
@@ -2393,22 +2516,6 @@ export default function App() {
           className="flex-1 relative vivaro-table-bg overflow-hidden transition-[background] duration-300"
           style={{ background: TABLE_THEME_BACKGROUNDS[settings.tableTheme] }}
         >
-          {/* Subtle Notification Toast */}
-          <AnimatePresence>
-            {toast && (
-              <motion.div
-                key={toast.id}
-                initial={{ opacity: 0, y: -10 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -10 }}
-                transition={{ duration: 0.16 }}
-                className="absolute top-[222px] sm:top-[148px] left-1/2 -translate-x-1/2 z-[160] bg-[#1b1f2a]/90 border border-white/15 px-4 py-1.5 rounded-full text-xs font-semibold text-slate-100 shadow-lg pointer-events-none whitespace-nowrap"
-              >
-                {toast.text}
-              </motion.div>
-            )}
-          </AnimatePresence>
-
           {/* Left Column: AI & Player Avatars (Positioned safely outside hands on mobile) */}
           <div className="absolute left-2 sm:left-6 top-[106px] sm:top-6 bottom-[126px] sm:bottom-6 flex flex-col justify-between z-20 pointer-events-none">
             <SegmentedAvatar
@@ -2992,6 +3099,23 @@ export default function App() {
           )}
         </main>
       )}
+
+      <AnimatePresence>
+        {toast && (
+          <motion.div
+            key={toast.id}
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            transition={{ duration: 0.16 }}
+            role="status"
+            aria-live="polite"
+            className="fixed top-3 sm:top-4 left-1/2 -translate-x-1/2 z-[260] max-w-[calc(100vw-2rem)] bg-[#1b1f2a]/95 border border-white/15 px-4 py-2 rounded-xl text-xs font-semibold text-slate-100 text-center shadow-lg pointer-events-none whitespace-normal"
+          >
+            {toast.text}
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Online Room Loading / Waiting Overlay */}
       {currentScreen === 'GAME' &&
