@@ -48,6 +48,7 @@ import {
   OnlineRoomDoc,
   UserProfile,
   WAITING_ROOM_HEARTBEAT_MS,
+  extractRoomDebugSummary,
   getRoomErrorMessage,
   isWaitingRoomActive,
   sanitizeRoomCode,
@@ -249,6 +250,7 @@ export default function App() {
   const [presenceNowMs, setPresenceNowMs] = useState<number>(() => Date.now());
   const [roomListError, setRoomListError] = useState<string | null>(null);
   const [roomActionError, setRoomActionError] = useState<string | null>(null);
+  const [roomActionDebug, setRoomActionDebug] = useState<string | null>(null);
   const [roomListVersion, setRoomListVersion] = useState(0);
   const [roomAction, setRoomAction] = useState<'creating' | 'joining' | null>(null);
   const [onlineRoomCode, setOnlineRoomCode] = useState<string | null>(null);
@@ -1900,6 +1902,7 @@ export default function App() {
   const handleCreateOnlineGame = async () => {
     if (roomAction) return;
     setRoomActionError(null);
+    setRoomActionDebug(null);
     if (!authReady && typeof auth.authStateReady === 'function') {
       await auth.authStateReady();
     }
@@ -1933,12 +1936,15 @@ export default function App() {
       setCopiedInvite(false);
       setRoomListError(null);
       setRoomActionError(null);
+      setRoomActionDebug(null);
     } catch (err) {
       const detailedMsg = getRoomErrorMessage(
         err,
         'Не удалось создать стол. Проверьте авторизацию Google, правила Firestore и подключение.'
       );
+      const debugSummary = extractRoomDebugSummary(err);
       setRoomActionError(detailedMsg);
+      setRoomActionDebug(debugSummary ? JSON.stringify(debugSummary, null, 2) : null);
       showToast(detailedMsg);
     } finally {
       setRoomAction(null);
@@ -1948,6 +1954,7 @@ export default function App() {
   const handleJoinOnlineByCode = async (rawCode: string) => {
     if (roomAction) return;
     setRoomActionError(null);
+    setRoomActionDebug(null);
     const clean = sanitizeRoomCode(rawCode);
     if (clean.length < 4) {
       showToast('Введите код стола друга (минимум 4 символа).');
@@ -2065,8 +2072,12 @@ export default function App() {
           waitingRooms={activeWaitingRooms}
           roomsError={roomListError}
           roomActionError={roomActionError}
+          roomActionDebug={roomActionDebug}
           onRetryRooms={() => setRoomListVersion((version) => version + 1)}
-          onDismissRoomActionError={() => setRoomActionError(null)}
+          onDismissRoomActionError={() => {
+            setRoomActionError(null);
+            setRoomActionDebug(null);
+          }}
           roomAction={roomAction}
           botsEnabled={settings.botsEnabled}
           initialJoinCode={pendingInviteCode}

@@ -10,6 +10,7 @@ interface LobbyViewProps {
   waitingRooms: OnlineRoomDoc[];
   roomsError: string | null;
   roomActionError?: string | null;
+  roomActionDebug?: string | null;
   onRetryRooms: () => void;
   onDismissRoomActionError?: () => void;
   roomAction: 'creating' | 'joining' | null;
@@ -31,6 +32,7 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   waitingRooms,
   roomsError,
   roomActionError,
+  roomActionDebug,
   onRetryRooms,
   onDismissRoomActionError,
   roomAction,
@@ -545,18 +547,25 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           {roomActionError && (
             <div
               role="alert"
-              className="px-3 py-2 rounded-lg bg-rose-500/15 border border-rose-500/35 text-[11px] text-rose-200 leading-relaxed flex items-start justify-between gap-2"
+              className="px-3 py-2 rounded-lg bg-rose-500/15 border border-rose-500/35 text-[11px] text-rose-200 leading-relaxed space-y-2"
             >
-              <span className="break-words">{roomActionError}</span>
-              {onDismissRoomActionError && (
-                <button
-                  type="button"
-                  onClick={onDismissRoomActionError}
-                  aria-label="Скрыть ошибку"
-                  className="text-rose-300 hover:text-white font-bold shrink-0 cursor-pointer"
-                >
-                  ×
-                </button>
+              <div className="flex items-start justify-between gap-2">
+                <span className="break-words">{roomActionError}</span>
+                {onDismissRoomActionError && (
+                  <button
+                    type="button"
+                    onClick={onDismissRoomActionError}
+                    aria-label="Скрыть ошибку"
+                    className="text-rose-300 hover:text-white font-bold shrink-0 cursor-pointer"
+                  >
+                    ×
+                  </button>
+                )}
+              </div>
+              {roomActionDebug && (
+                <pre className="max-h-36 overflow-auto rounded bg-black/40 border border-rose-400/20 p-2 text-[10px] font-mono text-rose-100 whitespace-pre-wrap break-all">
+                  {roomActionDebug}
+                </pre>
               )}
             </div>
           )}

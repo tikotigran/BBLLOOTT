@@ -2,6 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {
+  buildInitialOnlineRoomPayload,
+  validateCreateRoomPayload,
+  extractRoomDebugSummary,
   validateUserProfilePayload,
   validateHandPayload,
   isWaitingRoomActive,
@@ -163,3 +166,60 @@ test('getRoomErrorMessage distinguishes create, delete, list, auth, and join per
   );
   assert.match(getRoomErrorMessage(unauthErr, 'fallback'), /Нет активной авторизации Firebase Auth/);
 });
+
+test('buildInitialOnlineRoomPayload produces valid GameRoom payload matching firestore.rules constraints', () => {
+  const payload = buildInitialOnlineRoomPayload({
+    roomCode: 'AB12CD',
+    hostUid: 'pED43O8bk4TwBemazS4zwunJqFi1',
+    hostNickname: 'TikJan',
+    hostShortId: 'invalid-short-id',
+    tableId: 42, // below 100000 -> clamped to 100000
+    gameLimit: 101,
+    betAmount: 40000,
+    allowHighCombos: true,
+    allCombinationsDisabled: false,
+    turnTimeLimit: 30,
+    createdAt: SERVER_TOKEN,
+    updatedAt: SERVER_TOKEN,
+  });
+
+  assert.equal(validateCreateRoomPayload(payload, 'AB12CD', 'pED43O8bk4TwBemazS4zwunJqFi1').length, 0);
+  assert.match(payload.hostShortId, /^[0-9]{7}$/);
+  assert.ok(payload.config.tableId >= 100000 && payload.config.tableId <= 2147483647);
+  assert.equal(payload.round.phase, 'OFFERING_TRUMP');
+  assert.equal(payload.round.trump, '');
+
+  const invalidPayload = {
+    ...payload,
+    hostShortId: '123',
+    config: { ...payload.config, tableId: 99 },
+    round: { ...payload.round, phase: 'BAD_PHASE' as never, trump: 'BAD_TRUMP' as never },
+    createdAt: null,
+  };
+  const violations = validateCreateRoomPayload(invalidPayload, 'AB12CD', 'pED43O8bk4TwBemazS4zwunJqFi1');
+  assert.ok(violations.includes('hostShortId does not match ^[0-9]{7}$'));
+  assert.ok(violations.includes('config.tableId out of range'));
+  assert.ok(violations.includes('round.phase invalid'));
+  assert.ok(violations.includes('round.trump invalid'));
+  assert.ok(violations.includes('createdAt/updatedAt missing'));
+
+  const wrapped = Object.assign(new Error('err'), {
+    roomDebug: {
+      roomCode: 'AB12CD',
+      authUid: 'pED43O8bk4TwBemazS4zwunJqFi1',
+      emailVerified: true,
+      hostUid: payload.hostUid,
+      hostShortId: payload.hostShortId,
+      hostName: payload.hostName,
+      config: payload.config,
+      round: payload.round,
+      scores: payload.scores,
+      board: payload.board,
+      combos: payload.combos,
+      flags: payload.flags,
+      ruleViolations: [],
+    },
+  });
+  assert.equal(extractRoomDebugSummary(wrapped)?.hostShortId, payload.hostShortId);
+});
+

@@ -344,3 +344,213 @@ export function getRoomErrorMessage(error: unknown, fallback: string): string {
     ? `${displayCode ? `[${displayCode}] ` : ''}${message}`
     : fallback;
 }
+
+export interface CreateRoomPayloadOptions {
+  roomCode: string;
+  hostUid: string;
+  hostNickname?: string;
+  hostShortId?: string;
+  tableId?: number;
+  gameLimit: number;
+  betAmount: number;
+  allowHighCombos: boolean;
+  allCombinationsDisabled: boolean;
+  turnTimeLimit: number;
+  createdAt: unknown;
+  updatedAt: unknown;
+}
+
+export interface CreateRoomDebugFields {
+  roomCode: string;
+  authUid: string;
+  emailVerified: boolean;
+  hostUid: string;
+  hostShortId: string;
+  hostName: string;
+  config: OnlineRoomDoc['config'];
+  round: OnlineRoomDoc['round'];
+  scores: OnlineRoomDoc['scores'];
+  board: OnlineRoomDoc['board'];
+  combos: OnlineRoomDoc['combos'];
+  flags: OnlineRoomDoc['flags'];
+  ruleViolations: string[];
+}
+
+export function buildInitialOnlineRoomPayload(
+  opts: CreateRoomPayloadOptions
+): OnlineRoomDoc {
+  const safeUid = typeof opts.hostUid === 'string' ? opts.hostUid.trim() : '';
+  const safeRoomCode = sanitizeRoomCode(opts.roomCode);
+  const rawShortId = typeof opts.hostShortId === 'string' ? opts.hostShortId.trim() : '';
+  const safeShortId = SHORT_ID_PATTERN.test(rawShortId)
+    ? rawShortId
+    : deriveShortIdFromUid(safeUid);
+  const safeHostName =
+    sanitizeNickname(typeof opts.hostNickname === 'string' ? opts.hostNickname : '') || 'Игрок 1';
+  const rawTableId =
+    typeof opts.tableId === 'number' && Number.isFinite(opts.tableId)
+      ? Math.floor(opts.tableId)
+      : Math.floor(100000000 + Math.random() * 900000000);
+  const safeTableId = Math.min(2147483647, Math.max(100000, rawTableId));
+
+  return {
+    roomCode: safeRoomCode,
+    hostUid: safeUid,
+    hostName: safeHostName,
+    hostShortId: safeShortId,
+    guestUid: '',
+    guestName: '',
+    guestShortId: '',
+    status: 'waiting',
+    winnerUid: '',
+    config: {
+      tableId: safeTableId,
+      gameLimit: [51, 101, 151].includes(opts.gameLimit) ? opts.gameLimit : 101,
+      betAmount: Number.isFinite(opts.betAmount)
+        ? Math.min(100000, Math.max(1000, Math.round(opts.betAmount)))
+        : 1000,
+      allowHighCombos: Boolean(opts.allowHighCombos),
+      allCombinationsDisabled: Boolean(opts.allCombinationsDisabled),
+      turnTimeLimit: [15, 20, 30].includes(opts.turnTimeLimit) ? opts.turnTimeLimit : 30,
+    },
+    round: {
+      roundNumber: 0,
+      dealerRole: 'guest',
+      turnRole: 'host',
+      phase: 'OFFERING_TRUMP',
+      trump: '',
+      bidderRole: '',
+      lastWinnerRole: '',
+      pendingExtraDrawRole: '',
+    },
+    scores: {
+      hostScore: 0,
+      guestScore: 0,
+      hostRoundScore: 0,
+      guestRoundScore: 0,
+      hostCardCount: 0,
+      guestCardCount: 0,
+    },
+    board: {
+      offeredCard: null,
+      deck: [],
+      trickHostCard: null,
+      trickGuestCard: null,
+      playedCards: [],
+      roundBreakdown: null,
+    },
+    combos: {
+      hostAnnounced: [],
+      guestAnnounced: [],
+      hostDeclared: [],
+      guestDeclared: [],
+    },
+    flags: {
+      hostHasShown: false,
+      guestHasShown: false,
+      hostCanDeclare: true,
+      guestCanDeclare: true,
+      hostCanShow: true,
+      guestCanShow: true,
+      hostBlot: false,
+      guestBlot: false,
+    },
+    createdAt: opts.createdAt,
+    updatedAt: opts.updatedAt,
+  };
+}
+
+export function validateCreateRoomPayload(
+  payload: OnlineRoomDoc,
+  roomId: string,
+  authUid: string
+): string[] {
+  const errors: string[] = [];
+  if (!ROOM_CODE_PATTERN.test(roomId)) errors.push('roomId invalid');
+  if (payload.roomCode !== roomId) errors.push('roomCode !== roomId');
+  if (!ID_PATTERN.test(payload.hostUid) || payload.hostUid !== authUid) {
+    errors.push('hostUid !== authUid');
+  }
+  if (typeof payload.hostName !== 'string' || payload.hostName.length < 1 || payload.hostName.length > 24) {
+    errors.push('hostName length invalid');
+  }
+  if (!SHORT_ID_PATTERN.test(payload.hostShortId)) {
+    errors.push('hostShortId does not match ^[0-9]{7}$');
+  }
+  if (payload.guestUid !== '' || payload.guestName !== '' || payload.guestShortId !== '') {
+    errors.push('guest fields must be empty on create');
+  }
+  if (payload.status !== 'waiting') errors.push('status must be waiting');
+  if (payload.winnerUid !== '') errors.push('winnerUid must be empty');
+
+  const { config, round, scores, board, combos, flags } = payload;
+  if (typeof config.tableId !== 'number' || config.tableId < 100000 || config.tableId > 2147483647) {
+    errors.push('config.tableId out of range');
+  }
+  if (![51, 101, 151].includes(config.gameLimit)) errors.push('config.gameLimit invalid');
+  if (typeof config.betAmount !== 'number' || config.betAmount < 1000 || config.betAmount > 100000) {
+    errors.push('config.betAmount invalid');
+  }
+  if (![15, 20, 30].includes(config.turnTimeLimit)) errors.push('config.turnTimeLimit invalid');
+  if (typeof config.allowHighCombos !== 'boolean' || typeof config.allCombinationsDisabled !== 'boolean') {
+    errors.push('config boolean flags invalid');
+  }
+
+  if (typeof round.roundNumber !== 'number' || round.roundNumber < 0 || round.roundNumber > 100) {
+    errors.push('round.roundNumber invalid');
+  }
+  if (!['host', 'guest'].includes(round.dealerRole) || !['host', 'guest'].includes(round.turnRole)) {
+    errors.push('round role invalid');
+  }
+  if (!['OFFERING_TRUMP', 'SUIT_SELECTION', 'PLAYING', 'RESULT', 'GAME_OVER'].includes(round.phase)) {
+    errors.push('round.phase invalid');
+  }
+  if (!['', 'HEARTS', 'DIAMONDS', 'CLUBS', 'SPADES', 'NO_TRUMP'].includes(round.trump)) {
+    errors.push('round.trump invalid');
+  }
+  if (!['', 'host', 'guest'].includes(round.bidderRole) || !['', 'host', 'guest'].includes(round.lastWinnerRole) || !['', 'host', 'guest'].includes(round.pendingExtraDrawRole)) {
+    errors.push('round optional role invalid');
+  }
+
+  if (
+    scores.hostScore !== 0 ||
+    scores.guestScore !== 0 ||
+    scores.hostRoundScore !== 0 ||
+    scores.guestRoundScore !== 0 ||
+    scores.hostCardCount !== 0 ||
+    scores.guestCardCount !== 0
+  ) {
+    errors.push('scores must initialize to 0');
+  }
+
+  if (!Array.isArray(board.deck) || !Array.isArray(board.playedCards)) {
+    errors.push('board arrays invalid');
+  }
+  if (
+    !Array.isArray(combos.hostAnnounced) ||
+    !Array.isArray(combos.guestAnnounced) ||
+    !Array.isArray(combos.hostDeclared) ||
+    !Array.isArray(combos.guestDeclared)
+  ) {
+    errors.push('combos arrays invalid');
+  }
+  if (Object.values(flags).some((v) => typeof v !== 'boolean')) {
+    errors.push('flags must all be boolean');
+  }
+  if (!payload.createdAt || !payload.updatedAt) {
+    errors.push('createdAt/updatedAt missing');
+  }
+
+  return errors;
+}
+
+export function extractRoomDebugSummary(error: unknown): CreateRoomDebugFields | null {
+  if (typeof error === 'object' && error !== null && 'roomDebug' in error) {
+    const debug = (error as { roomDebug?: unknown }).roomDebug;
+    if (debug && typeof debug === 'object') {
+      return debug as CreateRoomDebugFields;
+    }
+  }
+  return null;
+}
+

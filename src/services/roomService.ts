@@ -17,9 +17,11 @@ import { Card, Combination, Rank, Suit, TrumpType } from '../types';
 import { createDeck, calculateRoundScore, resolveTrick } from '../logic/gameLogic';
 import { getCardValue } from '../constants';
 import {
+  CreateRoomDebugFields,
   OnlineRoomDoc,
   UserProfile,
   SHORT_ID_PATTERN,
+  buildInitialOnlineRoomPayload,
   deriveShortIdFromUid,
   generateRoomCode,
   isValidOnlineRoomShape,
@@ -28,6 +30,7 @@ import {
   sanitizeComboList,
   sanitizeNickname,
   sanitizeRoomCode,
+  validateCreateRoomPayload,
 } from '../utils/firestorePayloads';
 
 export type RoomRole = 'host' | 'guest';
@@ -93,85 +96,60 @@ export const createOnlineRoom = async (
 ): Promise<string> => {
   const currentUser = await requireAuthenticatedUser('создать стол');
   const activeUid = currentUser.uid;
-
-  const safeShortId = SHORT_ID_PATTERN.test(host.shortId || '')
-    ? host.shortId
-    : deriveShortIdFromUid(activeUid);
   const roomCode = generateRoomCode();
   const path = `rooms/${roomCode}`;
   const ref = doc(db, 'rooms', roomCode);
 
-  const payload: OnlineRoomDoc = {
+  const payload: OnlineRoomDoc = buildInitialOnlineRoomPayload({
     roomCode,
     hostUid: activeUid,
-    hostName: sanitizeNickname(host.nickname) || 'Игрок 1',
-    hostShortId: safeShortId,
-    guestUid: '',
-    guestName: '',
-    guestShortId: '',
-    status: 'waiting',
-    winnerUid: '',
-    config: {
-      tableId: Math.floor(100000000 + Math.random() * 900000000),
-      gameLimit: [51, 101, 151].includes(options.gameLimit) ? options.gameLimit : 101,
-      betAmount: Number.isFinite(options.betAmount)
-        ? Math.min(100000, Math.max(1000, Math.round(options.betAmount)))
-        : 1000,
-      allowHighCombos: Boolean(options.allowHighCombos),
-      allCombinationsDisabled: Boolean(options.allCombinationsDisabled),
-      turnTimeLimit: [15, 20, 30].includes(options.turnTimeLimit) ? options.turnTimeLimit : 30,
-    },
-    round: {
-      roundNumber: 0,
-      dealerRole: 'guest',
-      turnRole: 'host',
-      phase: 'OFFERING_TRUMP',
-      trump: '',
-      bidderRole: '',
-      lastWinnerRole: '',
-      pendingExtraDrawRole: '',
-    },
-    scores: {
-      hostScore: 0,
-      guestScore: 0,
-      hostRoundScore: 0,
-      guestRoundScore: 0,
-      hostCardCount: 0,
-      guestCardCount: 0,
-    },
-    board: {
-      offeredCard: null,
-      deck: [],
-      trickHostCard: null,
-      trickGuestCard: null,
-      playedCards: [],
-      roundBreakdown: null,
-    },
-    combos: {
-      hostAnnounced: [],
-      guestAnnounced: [],
-      hostDeclared: [],
-      guestDeclared: [],
-    },
-    flags: {
-      hostHasShown: false,
-      guestHasShown: false,
-      hostCanDeclare: true,
-      guestCanDeclare: true,
-      hostCanShow: true,
-      guestCanShow: true,
-      hostBlot: false,
-      guestBlot: false,
-    },
+    hostNickname: host.nickname,
+    hostShortId: host.shortId,
+    gameLimit: options.gameLimit,
+    betAmount: options.betAmount,
+    allowHighCombos: options.allowHighCombos,
+    allCombinationsDisabled: options.allCombinationsDisabled,
+    turnTimeLimit: options.turnTimeLimit,
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
-  };
+  });
+
+  const ruleViolations = validateCreateRoomPayload(payload, roomCode, activeUid);
+  console.log('[createOnlineRoom] payload:', {
+    ...payload,
+    authUid: activeUid,
+    emailVerified: currentUser.emailVerified,
+    ruleViolations,
+  });
 
   try {
     await setDoc(ref, payload);
     return roomCode;
   } catch (error) {
-    handleFirestoreError(error, OperationType.CREATE, path);
+    const debugFields: CreateRoomDebugFields = {
+      roomCode,
+      authUid: activeUid,
+      emailVerified: currentUser.emailVerified,
+      hostUid: payload.hostUid,
+      hostShortId: payload.hostShortId,
+      hostName: payload.hostName,
+      config: payload.config,
+      round: payload.round,
+      scores: payload.scores,
+      board: payload.board,
+      combos: payload.combos,
+      flags: payload.flags,
+      ruleViolations,
+    };
+    console.error('[createOnlineRoom] catch debugFields:', debugFields);
+    try {
+      handleFirestoreError(error, OperationType.CREATE, path);
+    } catch (wrappedErr) {
+      if (typeof wrappedErr === 'object' && wrappedErr !== null) {
+        (wrappedErr as Error & { roomDebug?: CreateRoomDebugFields }).roomDebug = debugFields;
+      }
+      throw wrappedErr;
+    }
   }
 };
 
