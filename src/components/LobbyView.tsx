@@ -9,7 +9,9 @@ interface LobbyViewProps {
   isSignedIn: boolean;
   waitingRooms: OnlineRoomDoc[];
   roomsError: string | null;
+  roomActionError?: string | null;
   onRetryRooms: () => void;
+  onDismissRoomActionError?: () => void;
   roomAction: 'creating' | 'joining' | null;
   botsEnabled: boolean;
   initialJoinCode?: string;
@@ -28,7 +30,9 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
   isSignedIn,
   waitingRooms,
   roomsError,
+  roomActionError,
   onRetryRooms,
+  onDismissRoomActionError,
   roomAction,
   botsEnabled,
   initialJoinCode = '',
@@ -205,20 +209,20 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                         <span className="text-[11px] font-mono text-amber-400">
                           {room.roomCode}
                         </span>
-                        {!room.allowHighCombos && !room.allCombinationsDisabled && (
+                        {!room.config.allowHighCombos && !room.config.allCombinationsDisabled && (
                           <Layers size={12} className="text-slate-400" />
                         )}
-                        {room.allCombinationsDisabled && (
+                        {room.config.allCombinationsDisabled && (
                           <ZapOff size={12} className="text-slate-400" />
                         )}
                       </div>
                       <div className="flex items-center flex-wrap gap-x-3 gap-y-0.5 text-[11px]">
                         <span className="font-mono font-bold text-[#e5a93c]">
-                          {room.betAmount.toLocaleString('en-US')}
+                          {room.config.betAmount.toLocaleString('en-US')}
                         </span>
-                        <span className="text-slate-300 font-mono">До {room.gameLimit}</span>
+                        <span className="text-slate-300 font-mono">До {room.config.gameLimit}</span>
                         <span className="text-slate-400 font-mono">
-                          {room.turnTimeLimit}с / 3м
+                          {room.config.turnTimeLimit}с / 3м
                         </span>
                         <span className="text-emerald-400">
                           {isMine ? 'ваш стол' : 'в ожидании'}
@@ -359,20 +363,20 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
                         )}
                       </td>
                       <td className="px-3 text-center font-mono font-bold text-[#e5a93c] tabular-nums">
-                        {room.betAmount.toLocaleString('en-US')}
+                        {room.config.betAmount.toLocaleString('en-US')}
                       </td>
                       <td className="px-3 text-center text-slate-200 font-mono tabular-nums">
-                        {room.gameLimit}
+                        {room.config.gameLimit}
                       </td>
                       <td className="px-3 text-center text-slate-400 font-mono tabular-nums">
-                        {room.turnTimeLimit}с / 3м
+                        {room.config.turnTimeLimit}с / 3м
                       </td>
                       <td className="px-3 text-center">
                         <div className="flex justify-center items-center text-slate-400">
-                          {!room.allowHighCombos && !room.allCombinationsDisabled && (
+                          {!room.config.allowHighCombos && !room.config.allCombinationsDisabled && (
                             <Layers size={14} aria-label="Без высоких комбинаций" />
                           )}
-                          {room.allCombinationsDisabled && (
+                          {room.config.allCombinationsDisabled && (
                             <ZapOff size={14} aria-label="Без комбинаций" />
                           )}
                         </div>
@@ -537,7 +541,25 @@ export const LobbyView: React.FC<LobbyViewProps> = ({
           </fieldset>
         </div>
 
-        <div className="p-3 sm:p-5 pt-2 border-t border-white/10 bg-[#181b24] shrink-0">
+        <div className="p-3 sm:p-5 pt-2 border-t border-white/10 bg-[#181b24] shrink-0 space-y-2.5">
+          {roomActionError && (
+            <div
+              role="alert"
+              className="px-3 py-2 rounded-lg bg-rose-500/15 border border-rose-500/35 text-[11px] text-rose-200 leading-relaxed flex items-start justify-between gap-2"
+            >
+              <span className="break-words">{roomActionError}</span>
+              {onDismissRoomActionError && (
+                <button
+                  type="button"
+                  onClick={onDismissRoomActionError}
+                  aria-label="Скрыть ошибку"
+                  className="text-rose-300 hover:text-white font-bold shrink-0 cursor-pointer"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          )}
           <button
             type="button"
             onClick={activeMode === 'ai' ? onCreateBotGame : onCreateOnlineGame}

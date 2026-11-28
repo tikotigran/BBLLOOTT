@@ -62,7 +62,7 @@
     },
     "GameRoom": {
       "title": "GameRoom",
-      "description": "Online 2-player Blot room state shared between host and guest.",
+      "description": "Online 2-player Blot room state shared between host and guest with modular sub-maps.",
       "type": "object",
       "properties": {
         "roomCode": {
@@ -105,137 +105,27 @@
           "enum": ["waiting", "playing", "finished"],
           "maxLength": 16
         },
-        "tableId": {
-          "type": "number"
-        },
-        "gameLimit": {
-          "type": "number"
-        },
-        "betAmount": {
-          "type": "number"
-        },
-        "allowHighCombos": {
-          "type": "boolean"
-        },
-        "allCombinationsDisabled": {
-          "type": "boolean"
-        },
-        "turnTimeLimit": {
-          "type": "number"
-        },
-        "roundNumber": {
-          "type": "number"
-        },
-        "dealerRole": {
-          "type": "string",
-          "enum": ["host", "guest"],
-          "maxLength": 8
-        },
-        "turnRole": {
-          "type": "string",
-          "enum": ["host", "guest"],
-          "maxLength": 8
-        },
-        "phase": {
-          "type": "string",
-          "enum": ["OFFERING_TRUMP", "SUIT_SELECTION", "PLAYING", "RESULT", "GAME_OVER"],
-          "maxLength": 24
-        },
-        "trump": {
-          "type": "string",
-          "enum": ["", "HEARTS", "DIAMONDS", "CLUBS", "SPADES", "NO_TRUMP"],
-          "maxLength": 16
-        },
-        "bidderRole": {
-          "type": "string",
-          "enum": ["", "host", "guest"],
-          "maxLength": 8
-        },
-        "lastWinnerRole": {
-          "type": "string",
-          "enum": ["", "host", "guest"],
-          "maxLength": 8
-        },
-        "pendingExtraDrawRole": {
-          "type": "string",
-          "enum": ["", "host", "guest"],
-          "maxLength": 8
-        },
         "winnerUid": {
           "type": "string",
           "maxLength": 128,
           "pattern": "^$|^[a-zA-Z0-9_\\-]+$"
         },
-        "hostScore": {
-          "type": "number"
-        },
-        "guestScore": {
-          "type": "number"
-        },
-        "hostRoundScore": {
-          "type": "number"
-        },
-        "guestRoundScore": {
-          "type": "number"
-        },
-        "hostCardCount": {
-          "type": "number"
-        },
-        "guestCardCount": {
-          "type": "number"
-        },
-        "offeredCard": {
+        "config": {
           "type": "object"
         },
-        "deck": {
-          "type": "array"
-        },
-        "trickHostCard": {
+        "round": {
           "type": "object"
         },
-        "trickGuestCard": {
+        "scores": {
           "type": "object"
         },
-        "playedCards": {
-          "type": "array"
+        "board": {
+          "type": "object"
         },
-        "hostAnnouncedCombos": {
-          "type": "array"
+        "combos": {
+          "type": "object"
         },
-        "guestAnnouncedCombos": {
-          "type": "array"
-        },
-        "hostDeclaredCombos": {
-          "type": "array"
-        },
-        "guestDeclaredCombos": {
-          "type": "array"
-        },
-        "hostHasShownCombos": {
-          "type": "boolean"
-        },
-        "guestHasShownCombos": {
-          "type": "boolean"
-        },
-        "hostCanDeclare": {
-          "type": "boolean"
-        },
-        "guestCanDeclare": {
-          "type": "boolean"
-        },
-        "hostCanShow": {
-          "type": "boolean"
-        },
-        "guestCanShow": {
-          "type": "boolean"
-        },
-        "hostBlotDeclared": {
-          "type": "boolean"
-        },
-        "guestBlotDeclared": {
-          "type": "boolean"
-        },
-        "roundBreakdown": {
+        "flags": {
           "type": "object"
         },
         "createdAt": {
@@ -256,41 +146,13 @@
         "guestName",
         "guestShortId",
         "status",
-        "tableId",
-        "gameLimit",
-        "betAmount",
-        "allowHighCombos",
-        "allCombinationsDisabled",
-        "turnTimeLimit",
-        "roundNumber",
-        "dealerRole",
-        "turnRole",
-        "phase",
-        "trump",
-        "bidderRole",
-        "lastWinnerRole",
-        "pendingExtraDrawRole",
         "winnerUid",
-        "hostScore",
-        "guestScore",
-        "hostRoundScore",
-        "guestRoundScore",
-        "hostCardCount",
-        "guestCardCount",
-        "deck",
-        "playedCards",
-        "hostAnnouncedCombos",
-        "guestAnnouncedCombos",
-        "hostDeclaredCombos",
-        "guestDeclaredCombos",
-        "hostHasShownCombos",
-        "guestHasShownCombos",
-        "hostCanDeclare",
-        "guestCanDeclare",
-        "hostCanShow",
-        "guestCanShow",
-        "hostBlotDeclared",
-        "guestBlotDeclared",
+        "config",
+        "round",
+        "scores",
+        "board",
+        "combos",
+        "flags",
         "createdAt",
         "updatedAt"
       ]

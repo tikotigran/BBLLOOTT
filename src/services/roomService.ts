@@ -22,6 +22,7 @@ import {
   SHORT_ID_PATTERN,
   deriveShortIdFromUid,
   generateRoomCode,
+  isValidOnlineRoomShape,
   isWaitingRoomActive,
   sanitizeCard,
   sanitizeComboList,
@@ -71,14 +72,28 @@ export interface CreateRoomOptions {
   turnTimeLimit: number;
 }
 
+const requireAuthenticatedUser = async (actionLabel: string) => {
+  if (typeof auth.authStateReady === 'function') {
+    await auth.authStateReady();
+  }
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    throw new RoomActionError(`Войдите через Google, чтобы ${actionLabel}`);
+  }
+  if (currentUser.emailVerified === false) {
+    throw new RoomActionError(`Подтвердите email в Google-аккаунте, чтобы ${actionLabel}`);
+  }
+  await currentUser.getIdToken();
+  return currentUser;
+};
+
 export const createOnlineRoom = async (
   host: UserProfile,
   options: CreateRoomOptions
 ): Promise<string> => {
-  const activeUid = auth.currentUser?.uid || host.uid;
-  if (!activeUid) {
-    throw new RoomActionError('Войдите через Google, чтобы создать стол');
-  }
+  const currentUser = await requireAuthenticatedUser('создать стол');
+  const activeUid = currentUser.uid;
+
   const safeShortId = SHORT_ID_PATTERN.test(host.shortId || '')
     ? host.shortId
     : deriveShortIdFromUid(activeUid);
@@ -95,45 +110,59 @@ export const createOnlineRoom = async (
     guestName: '',
     guestShortId: '',
     status: 'waiting',
-    tableId: Math.floor(1000000000 + Math.random() * 900000000),
-    gameLimit: [51, 101, 151].includes(options.gameLimit) ? options.gameLimit : 101,
-    betAmount: Math.min(100000, Math.max(1000, options.betAmount)),
-    allowHighCombos: Boolean(options.allowHighCombos),
-    allCombinationsDisabled: Boolean(options.allCombinationsDisabled),
-    turnTimeLimit: [15, 20, 30].includes(options.turnTimeLimit) ? options.turnTimeLimit : 30,
-    roundNumber: 0,
-    dealerRole: 'guest',
-    turnRole: 'host',
-    phase: 'OFFERING_TRUMP',
-    trump: '',
-    bidderRole: '',
-    lastWinnerRole: '',
-    pendingExtraDrawRole: '',
     winnerUid: '',
-    hostScore: 0,
-    guestScore: 0,
-    hostRoundScore: 0,
-    guestRoundScore: 0,
-    hostCardCount: 0,
-    guestCardCount: 0,
-    offeredCard: null,
-    deck: [],
-    trickHostCard: null,
-    trickGuestCard: null,
-    playedCards: [],
-    hostAnnouncedCombos: [],
-    guestAnnouncedCombos: [],
-    hostDeclaredCombos: [],
-    guestDeclaredCombos: [],
-    hostHasShownCombos: false,
-    guestHasShownCombos: false,
-    hostCanDeclare: true,
-    guestCanDeclare: true,
-    hostCanShow: true,
-    guestCanShow: true,
-    hostBlotDeclared: false,
-    guestBlotDeclared: false,
-    roundBreakdown: null,
+    config: {
+      tableId: Math.floor(100000000 + Math.random() * 900000000),
+      gameLimit: [51, 101, 151].includes(options.gameLimit) ? options.gameLimit : 101,
+      betAmount: Number.isFinite(options.betAmount)
+        ? Math.min(100000, Math.max(1000, Math.round(options.betAmount)))
+        : 1000,
+      allowHighCombos: Boolean(options.allowHighCombos),
+      allCombinationsDisabled: Boolean(options.allCombinationsDisabled),
+      turnTimeLimit: [15, 20, 30].includes(options.turnTimeLimit) ? options.turnTimeLimit : 30,
+    },
+    round: {
+      roundNumber: 0,
+      dealerRole: 'guest',
+      turnRole: 'host',
+      phase: 'OFFERING_TRUMP',
+      trump: '',
+      bidderRole: '',
+      lastWinnerRole: '',
+      pendingExtraDrawRole: '',
+    },
+    scores: {
+      hostScore: 0,
+      guestScore: 0,
+      hostRoundScore: 0,
+      guestRoundScore: 0,
+      hostCardCount: 0,
+      guestCardCount: 0,
+    },
+    board: {
+      offeredCard: null,
+      deck: [],
+      trickHostCard: null,
+      trickGuestCard: null,
+      playedCards: [],
+      roundBreakdown: null,
+    },
+    combos: {
+      hostAnnounced: [],
+      guestAnnounced: [],
+      hostDeclared: [],
+      guestDeclared: [],
+    },
+    flags: {
+      hostHasShown: false,
+      guestHasShown: false,
+      hostCanDeclare: true,
+      guestCanDeclare: true,
+      hostCanShow: true,
+      guestCanShow: true,
+      hostBlot: false,
+      guestBlot: false,
+    },
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   };
@@ -156,10 +185,8 @@ export const joinOnlineRoom = async (
   }
   const path = `rooms/${roomCode}`;
   const ref = doc(db, 'rooms', roomCode);
-  const activeUid = auth.currentUser?.uid || guest.uid;
-  if (!activeUid) {
-    throw new RoomActionError('Войдите через Google, чтобы подключиться к столу');
-  }
+  const currentUser = await requireAuthenticatedUser('подключиться к столу');
+  const activeUid = currentUser.uid;
   const safeShortId = SHORT_ID_PATTERN.test(guest.shortId || '')
     ? guest.shortId
     : deriveShortIdFromUid(activeUid);
@@ -177,7 +204,11 @@ export const joinOnlineRoom = async (
         throw new RoomActionError('Стол с таким кодом не найден');
       }
 
-      const room = snap.data() as OnlineRoomDoc;
+      const raw = snap.data();
+      if (!isValidOnlineRoomShape(raw)) {
+        throw new RoomActionError('Этот стол устарел и больше недоступен');
+      }
+      const room = raw;
       if (room.hostUid === activeUid || room.guestUid === activeUid) {
         if (room.status === 'finished') {
           throw new RoomActionError('Эта игра уже завершена');
@@ -228,7 +259,8 @@ export const cancelWaitingOnlineRoom = async (
   roomCode: string,
   callerUid?: string
 ): Promise<void> => {
-  if (!callerUid) return;
+  const activeUid = auth.currentUser?.uid || callerUid;
+  if (!activeUid) return;
 
   const path = `rooms/${roomCode}`;
   const ref = doc(db, 'rooms', roomCode);
@@ -238,20 +270,23 @@ export const cancelWaitingOnlineRoom = async (
       if (!snap.exists()) return;
       const live = snap.data() as OnlineRoomDoc;
       if (live.status === 'finished') return;
-      if (callerUid && live.hostUid !== callerUid && live.guestUid !== callerUid) return;
+      if (live.hostUid !== activeUid && live.guestUid !== activeUid) return;
 
       if (live.status === 'waiting') {
-        if (live.hostUid !== callerUid) return;
+        if (live.hostUid !== activeUid) return;
         tx.delete(ref);
-      } else if (live.status === 'playing') {
+      } else if (live.status === 'playing' && isValidOnlineRoomShape(live)) {
         const winnerUid =
-          callerUid && callerUid === live.hostUid
+          activeUid === live.hostUid
             ? live.guestUid || live.hostUid
             : live.hostUid;
         tx.update(ref, {
           status: 'finished',
-          phase: 'GAME_OVER',
           winnerUid,
+          round: {
+            ...live.round,
+            phase: 'GAME_OVER',
+          },
           updatedAt: serverTimestamp(),
         });
       }
@@ -286,7 +321,12 @@ export const subscribeOnlineRoom = (
   return onSnapshot(
     ref,
     (snap) => {
-      onData(snap.exists() ? (snap.data() as OnlineRoomDoc) : null);
+      if (!snap.exists()) {
+        onData(null);
+        return;
+      }
+      const data = snap.data();
+      onData(isValidOnlineRoomShape(data) ? data : null);
     },
     (error) => {
       if (onError) {
@@ -311,7 +351,9 @@ export const subscribeWaitingOnlineRooms = (
   return onSnapshot(
     q,
     (snapshot) => {
-      const list = snapshot.docs.map((d) => d.data() as OnlineRoomDoc);
+      const list = snapshot.docs
+        .map((d) => d.data())
+        .filter(isValidOnlineRoomShape);
       list.sort((a, b) => {
         const ta = (a.createdAt as { toMillis?: () => number } | undefined)?.toMillis?.() ?? 0;
         const tb = (b.createdAt as { toMillis?: () => number } | undefined)?.toMillis?.() ?? 0;
@@ -368,7 +410,7 @@ export const dealOnlineRound = async (
   const offeredCard = deck[10];
   const remaining = deck.slice(11);
 
-  const nextDealer: RoomRole = room.dealerRole === 'host' ? 'guest' : 'host';
+  const nextDealer: RoomRole = room.round.dealerRole === 'host' ? 'guest' : 'host';
   const nextTurn: RoomRole = nextDealer === 'host' ? 'guest' : 'host';
 
   const batch = writeBatch(db);
@@ -389,38 +431,48 @@ export const dealOnlineRound = async (
     updatedAt: serverTimestamp(),
   });
   batch.update(roomRef, {
-    roundNumber: isNewGame ? 1 : room.roundNumber + 1,
-    dealerRole: nextDealer,
-    turnRole: nextTurn,
-    phase: 'OFFERING_TRUMP',
-    trump: '',
-    bidderRole: '',
-    lastWinnerRole: '',
-    pendingExtraDrawRole: '',
-    hostScore: isNewGame ? 0 : room.hostScore,
-    guestScore: isNewGame ? 0 : room.guestScore,
-    hostRoundScore: 0,
-    guestRoundScore: 0,
-    hostCardCount: 5,
-    guestCardCount: 5,
-    offeredCard,
-    deck: remaining,
-    trickHostCard: null,
-    trickGuestCard: null,
-    playedCards: [],
-    hostAnnouncedCombos: [],
-    guestAnnouncedCombos: [],
-    hostDeclaredCombos: [],
-    guestDeclaredCombos: [],
-    hostHasShownCombos: false,
-    guestHasShownCombos: false,
-    hostCanDeclare: true,
-    guestCanDeclare: true,
-    hostCanShow: true,
-    guestCanShow: true,
-    hostBlotDeclared: false,
-    guestBlotDeclared: false,
-    roundBreakdown: null,
+    round: {
+      roundNumber: isNewGame ? 1 : room.round.roundNumber + 1,
+      dealerRole: nextDealer,
+      turnRole: nextTurn,
+      phase: 'OFFERING_TRUMP',
+      trump: '',
+      bidderRole: '',
+      lastWinnerRole: '',
+      pendingExtraDrawRole: '',
+    },
+    scores: {
+      hostScore: isNewGame ? 0 : room.scores.hostScore,
+      guestScore: isNewGame ? 0 : room.scores.guestScore,
+      hostRoundScore: 0,
+      guestRoundScore: 0,
+      hostCardCount: 5,
+      guestCardCount: 5,
+    },
+    board: {
+      offeredCard,
+      deck: remaining,
+      trickHostCard: null,
+      trickGuestCard: null,
+      playedCards: [],
+      roundBreakdown: null,
+    },
+    combos: {
+      hostAnnounced: [],
+      guestAnnounced: [],
+      hostDeclared: [],
+      guestDeclared: [],
+    },
+    flags: {
+      hostHasShown: false,
+      guestHasShown: false,
+      hostCanDeclare: true,
+      guestCanDeclare: true,
+      hostCanShow: true,
+      guestCanShow: true,
+      hostBlot: false,
+      guestBlot: false,
+    },
     updatedAt: serverTimestamp(),
   });
 
@@ -438,12 +490,16 @@ export const onlineTakeTrump = async (
   myHand: Card[],
   trump: TrumpType
 ): Promise<void> => {
-  if (!room.offeredCard) return;
-  const deck = [...room.deck];
+  if (!room.board.offeredCard) return;
+  const deck = [...room.board.deck];
   const extra = deck.splice(0, 2).map(sanitizeCard);
-  const newMyHand = sortCards([...myHand.map(sanitizeCard), sanitizeCard(room.offeredCard), ...extra]).slice(0, 8);
+  const newMyHand = sortCards([
+    ...myHand.map(sanitizeCard),
+    sanitizeCard(room.board.offeredCard),
+    ...extra,
+  ]).slice(0, 8);
   const otherRole: RoomRole = myRole === 'host' ? 'guest' : 'host';
-  const firstTurn: RoomRole = room.dealerRole === 'host' ? 'guest' : 'host';
+  const firstTurn: RoomRole = room.round.dealerRole === 'host' ? 'guest' : 'host';
 
   const batch = writeBatch(db);
   batch.set(doc(db, 'rooms', room.roomCode, 'hands', myUid), {
@@ -453,16 +509,25 @@ export const onlineTakeTrump = async (
     updatedAt: serverTimestamp(),
   });
   batch.update(doc(db, 'rooms', room.roomCode), {
-    deck: deck.map(sanitizeCard),
-    offeredCard: null,
-    trump,
-    bidderRole: myRole,
-    phase: 'PLAYING',
-    pendingExtraDrawRole: otherRole,
-    turnRole: firstTurn,
-    ...(myRole === 'host'
-      ? { hostCardCount: newMyHand.length }
-      : { guestCardCount: newMyHand.length }),
+    round: {
+      ...room.round,
+      trump,
+      bidderRole: myRole,
+      phase: 'PLAYING',
+      pendingExtraDrawRole: otherRole,
+      turnRole: firstTurn,
+    },
+    scores: {
+      ...room.scores,
+      ...(myRole === 'host'
+        ? { hostCardCount: newMyHand.length }
+        : { guestCardCount: newMyHand.length }),
+    },
+    board: {
+      ...room.board,
+      deck: deck.map(sanitizeCard),
+      offeredCard: null,
+    },
     updatedAt: serverTimestamp(),
   });
 
@@ -479,8 +544,8 @@ export const onlineDrawExtraCards = async (
   myUid: string,
   myHand: Card[]
 ): Promise<void> => {
-  if (room.pendingExtraDrawRole !== myRole) return;
-  const deck = [...room.deck];
+  if (room.round.pendingExtraDrawRole !== myRole) return;
+  const deck = [...room.board.deck];
   const extra = deck.splice(0, 3).map(sanitizeCard);
   const newMyHand = sortCards([...myHand.map(sanitizeCard), ...extra]).slice(0, 8);
 
@@ -492,11 +557,20 @@ export const onlineDrawExtraCards = async (
     updatedAt: serverTimestamp(),
   });
   batch.update(doc(db, 'rooms', room.roomCode), {
-    deck: deck.map(sanitizeCard),
-    pendingExtraDrawRole: '',
-    ...(myRole === 'host'
-      ? { hostCardCount: newMyHand.length }
-      : { guestCardCount: newMyHand.length }),
+    round: {
+      ...room.round,
+      pendingExtraDrawRole: '',
+    },
+    scores: {
+      ...room.scores,
+      ...(myRole === 'host'
+        ? { hostCardCount: newMyHand.length }
+        : { guestCardCount: newMyHand.length }),
+    },
+    board: {
+      ...room.board,
+      deck: deck.map(sanitizeCard),
+    },
     updatedAt: serverTimestamp(),
   });
 
@@ -511,7 +585,7 @@ export const onlinePassTrump = async (
   room: OnlineRoomDoc,
   myRole: RoomRole
 ): Promise<void> => {
-  if (room.status !== 'playing' || room.turnRole !== myRole) return;
+  if (room.status !== 'playing' || room.round.turnRole !== myRole) return;
   const path = `rooms/${room.roomCode}`;
   const ref = doc(db, 'rooms', room.roomCode);
 
@@ -520,25 +594,28 @@ export const onlinePassTrump = async (
       const snap = await tx.get(ref);
       if (!snap.exists()) return;
       const live = snap.data() as OnlineRoomDoc;
-      if (live.status !== 'playing' || live.turnRole !== myRole) return;
+      if (live.status !== 'playing' || live.round.turnRole !== myRole) return;
 
       const otherRole: RoomRole = myRole === 'host' ? 'guest' : 'host';
-      let nextPhase = live.phase;
+      let nextPhase = live.round.phase;
 
-      if (live.phase === 'OFFERING_TRUMP') {
-        if (live.dealerRole === myRole) {
-          if (live.offeredCard?.rank === Rank.JACK) return;
+      if (live.round.phase === 'OFFERING_TRUMP') {
+        if (live.round.dealerRole === myRole) {
+          if (live.board.offeredCard?.rank === Rank.JACK) return;
           nextPhase = 'SUIT_SELECTION';
         }
-      } else if (live.phase === 'SUIT_SELECTION') {
-        if (live.dealerRole === myRole) return;
+      } else if (live.round.phase === 'SUIT_SELECTION') {
+        if (live.round.dealerRole === myRole) return;
       } else {
         return;
       }
 
       tx.update(ref, {
-        turnRole: otherRole,
-        phase: nextPhase,
+        round: {
+          ...live.round,
+          turnRole: otherRole,
+          phase: nextPhase,
+        },
         updatedAt: serverTimestamp(),
       });
     });
@@ -555,8 +632,6 @@ export const onlineAnnounceCombo = async (
   if (room.status !== 'playing') return;
   const path = `rooms/${room.roomCode}`;
   const ref = doc(db, 'rooms', room.roomCode);
-  const otherKey = myRole === 'host' ? 'guestAnnouncedCombos' : 'hostAnnouncedCombos';
-  const myKey = myRole === 'host' ? 'hostAnnouncedCombos' : 'guestAnnouncedCombos';
   const hierarchy: Record<Combination['type'], number> = {
     Terz: 1,
     Fifty: 2,
@@ -571,19 +646,32 @@ export const onlineAnnounceCombo = async (
       const live = snap.data() as OnlineRoomDoc;
       if (
         live.status !== 'playing' ||
-        live.phase !== 'PLAYING' ||
-        live.playedCards.length > 0 ||
-        live.turnRole !== myRole
+        live.round.phase !== 'PLAYING' ||
+        live.board.playedCards.length > 0 ||
+        live.round.turnRole !== myRole
       ) {
         return;
       }
-      const oppList = myRole === 'host' ? live.guestAnnouncedCombos : live.hostAnnouncedCombos;
+      const oppList =
+        myRole === 'host' ? live.combos.guestAnnounced : live.combos.hostAnnounced;
       const oppStrongest = oppList.length > 0 ? oppList[0] : null;
-      const clearOpp = oppStrongest && hierarchy[chosen.type] > hierarchy[oppStrongest.type];
+      const clearOpp = Boolean(
+        oppStrongest && hierarchy[chosen.type] > hierarchy[oppStrongest.type]
+      );
 
       tx.update(ref, {
-        [myKey]: sanitizeComboList([chosen]),
-        ...(clearOpp ? { [otherKey]: [] } : {}),
+        combos: {
+          ...live.combos,
+          ...(myRole === 'host'
+            ? {
+                hostAnnounced: sanitizeComboList([chosen]),
+                ...(clearOpp ? { guestAnnounced: [] } : {}),
+              }
+            : {
+                guestAnnounced: sanitizeComboList([chosen]),
+                ...(clearOpp ? { hostAnnounced: [] } : {}),
+              }),
+        },
         updatedAt: serverTimestamp(),
       });
     });
@@ -609,31 +697,36 @@ export const onlineShowCombos = async (
       if (!snap.exists()) return;
       const live = snap.data() as OnlineRoomDoc;
       const alreadyShown =
-        myRole === 'host' ? live.hostHasShownCombos : live.guestHasShownCombos;
+        myRole === 'host' ? live.flags.hostHasShown : live.flags.guestHasShown;
       if (
         live.status !== 'playing' ||
-        live.phase !== 'PLAYING' ||
-        live.playedCards.length !== 1 ||
-        live.turnRole !== myRole ||
+        live.round.phase !== 'PLAYING' ||
+        live.board.playedCards.length !== 1 ||
+        live.round.turnRole !== myRole ||
         alreadyShown
       ) {
         return;
       }
 
       tx.update(ref, {
-        ...(myRole === 'host'
-          ? {
-              hostDeclaredCombos: sanitized,
-              hostHasShownCombos: true,
-              hostRoundScore: live.hostRoundScore + totalPoints,
-              guestAnnouncedCombos: [],
-            }
-          : {
-              guestDeclaredCombos: sanitized,
-              guestHasShownCombos: true,
-              guestRoundScore: live.guestRoundScore + totalPoints,
-              hostAnnouncedCombos: [],
-            }),
+        scores: {
+          ...live.scores,
+          ...(myRole === 'host'
+            ? { hostRoundScore: live.scores.hostRoundScore + totalPoints }
+            : { guestRoundScore: live.scores.guestRoundScore + totalPoints }),
+        },
+        combos: {
+          ...live.combos,
+          ...(myRole === 'host'
+            ? { hostDeclared: sanitized, guestAnnounced: [] }
+            : { guestDeclared: sanitized, hostAnnounced: [] }),
+        },
+        flags: {
+          ...live.flags,
+          ...(myRole === 'host'
+            ? { hostHasShown: true }
+            : { guestHasShown: true }),
+        },
         updatedAt: serverTimestamp(),
       });
     });
@@ -651,11 +744,16 @@ export const onlinePlayCard = async (
   newBlotDeclared: boolean
 ): Promise<void> => {
   const otherRole: RoomRole = myRole === 'host' ? 'guest' : 'host';
-  const oppHasCard = myRole === 'host' ? Boolean(room.trickGuestCard) : Boolean(room.trickHostCard);
-  const trickIndex = room.playedCards.length;
+  const oppHasCard =
+    myRole === 'host'
+      ? Boolean(room.board.trickGuestCard)
+      : Boolean(room.board.trickHostCard);
+  const trickIndex = room.board.playedCards.length;
 
-  const myAnnounced = myRole === 'host' ? room.hostAnnouncedCombos : room.guestAnnouncedCombos;
-  const myHasShown = myRole === 'host' ? room.hostHasShownCombos : room.guestHasShownCombos;
+  const myAnnounced =
+    myRole === 'host' ? room.combos.hostAnnounced : room.combos.guestAnnounced;
+  const myHasShown =
+    myRole === 'host' ? room.flags.hostHasShown : room.flags.guestHasShown;
 
   const clearUnshown = trickIndex === 1 && !myHasShown;
 
@@ -667,24 +765,46 @@ export const onlinePlayCard = async (
     updatedAt: serverTimestamp(),
   });
   batch.update(doc(db, 'rooms', room.roomCode), {
-    ...(myRole === 'host'
-      ? {
-          trickHostCard: sanitizeCard(playedCard),
-          hostCardCount: remainingHand.length,
-          hostBlotDeclared: newBlotDeclared,
-          ...(trickIndex === 0 ? { hostCanDeclare: false } : {}),
-          ...(clearUnshown ? { hostAnnouncedCombos: [], hostCanShow: false } : {}),
-          ...(!clearUnshown ? { hostAnnouncedCombos: sanitizeComboList(myAnnounced) } : {}),
-        }
-      : {
-          trickGuestCard: sanitizeCard(playedCard),
-          guestCardCount: remainingHand.length,
-          guestBlotDeclared: newBlotDeclared,
-          ...(trickIndex === 0 ? { guestCanDeclare: false } : {}),
-          ...(clearUnshown ? { guestAnnouncedCombos: [], guestCanShow: false } : {}),
-          ...(!clearUnshown ? { guestAnnouncedCombos: sanitizeComboList(myAnnounced) } : {}),
-        }),
-    turnRole: oppHasCard ? myRole : otherRole,
+    round: {
+      ...room.round,
+      turnRole: oppHasCard ? myRole : otherRole,
+    },
+    scores: {
+      ...room.scores,
+      ...(myRole === 'host'
+        ? { hostCardCount: remainingHand.length }
+        : { guestCardCount: remainingHand.length }),
+    },
+    board: {
+      ...room.board,
+      ...(myRole === 'host'
+        ? { trickHostCard: sanitizeCard(playedCard) }
+        : { trickGuestCard: sanitizeCard(playedCard) }),
+    },
+    combos: {
+      ...room.combos,
+      ...(myRole === 'host'
+        ? {
+            hostAnnounced: clearUnshown ? [] : sanitizeComboList(myAnnounced),
+          }
+        : {
+            guestAnnounced: clearUnshown ? [] : sanitizeComboList(myAnnounced),
+          }),
+    },
+    flags: {
+      ...room.flags,
+      ...(myRole === 'host'
+        ? {
+            hostBlot: newBlotDeclared,
+            ...(trickIndex === 0 ? { hostCanDeclare: false } : {}),
+            ...(clearUnshown ? { hostCanShow: false } : {}),
+          }
+        : {
+            guestBlot: newBlotDeclared,
+            ...(trickIndex === 0 ? { guestCanDeclare: false } : {}),
+            ...(clearUnshown ? { guestCanShow: false } : {}),
+          }),
+    },
     updatedAt: serverTimestamp(),
   });
 
@@ -696,7 +816,12 @@ export const onlinePlayCard = async (
 };
 
 export const onlineResolveTrick = async (room: OnlineRoomDoc): Promise<void> => {
-  if (room.status !== 'playing' || !room.trickHostCard || !room.trickGuestCard || !room.trump) {
+  if (
+    room.status !== 'playing' ||
+    !room.board.trickHostCard ||
+    !room.board.trickGuestCard ||
+    !room.round.trump
+  ) {
     return;
   }
   const path = `rooms/${room.roomCode}`;
@@ -709,24 +834,24 @@ export const onlineResolveTrick = async (room: OnlineRoomDoc): Promise<void> => 
       const live = snap.data() as OnlineRoomDoc;
       if (
         live.status !== 'playing' ||
-        !live.trickHostCard ||
-        !live.trickGuestCard ||
-        !live.trump
+        !live.board.trickHostCard ||
+        !live.board.trickGuestCard ||
+        !live.round.trump
       ) {
         return;
       }
 
-      const hostCard = live.trickHostCard;
-      const guestCard = live.trickGuestCard;
-      const trump = live.trump as TrumpType;
+      const hostCard = live.board.trickHostCard;
+      const guestCard = live.board.trickGuestCard;
+      const trump = live.round.trump as TrumpType;
       const firstRole: RoomRole =
-        live.lastWinnerRole || (live.dealerRole === 'host' ? 'guest' : 'host');
+        live.round.lastWinnerRole || (live.round.dealerRole === 'host' ? 'guest' : 'host');
       const leadCard = firstRole === 'host' ? hostCard : guestCard;
       const rawWinner = resolveTrick(hostCard, guestCard, trump, leadCard.suit);
       const winnerRole: RoomRole = rawWinner === 'player' ? 'host' : 'guest';
 
       const newPlayedCards = [
-        ...live.playedCards,
+        ...live.board.playedCards,
         {
           host: sanitizeCard(hostCard),
           guest: sanitizeCard(guestCard),
@@ -734,20 +859,22 @@ export const onlineResolveTrick = async (room: OnlineRoomDoc): Promise<void> => 
         },
       ];
 
-      const isLastTrick = live.hostCardCount === 0 && live.guestCardCount === 0;
+      const isLastTrick = live.scores.hostCardCount === 0 && live.scores.guestCardCount === 0;
       const trickPoints =
         getCardValue(hostCard.rank, hostCard.suit, trump) +
         getCardValue(guestCard.rank, guestCard.suit, trump) +
         (isLastTrick ? 10 : 0);
 
-      let hostRoundScore = live.hostRoundScore + (winnerRole === 'host' ? trickPoints : 0);
-      let guestRoundScore = live.guestRoundScore + (winnerRole === 'guest' ? trickPoints : 0);
-      let hostScore = live.hostScore;
-      let guestScore = live.guestScore;
-      let phase = live.phase;
+      let hostRoundScore =
+        live.scores.hostRoundScore + (winnerRole === 'host' ? trickPoints : 0);
+      let guestRoundScore =
+        live.scores.guestRoundScore + (winnerRole === 'guest' ? trickPoints : 0);
+      let hostScore = live.scores.hostScore;
+      let guestScore = live.scores.guestScore;
+      let phase = live.round.phase;
       let status: OnlineRoomDoc['status'] = live.status;
       let winnerUid = live.winnerUid;
-      let roundBreakdown = live.roundBreakdown;
+      let roundBreakdown = live.board.roundBreakdown;
 
       if (isLastTrick) {
         const mappedTricks = newPlayedCards.map((t) => ({
@@ -758,12 +885,12 @@ export const onlineResolveTrick = async (room: OnlineRoomDoc): Promise<void> => 
         const result = calculateRoundScore(
           mappedTricks,
           trump,
-          live.bidderRole === 'guest' ? 'ai' : 'player',
-          live.hostDeclaredCombos,
-          live.guestDeclaredCombos,
+          live.round.bidderRole === 'guest' ? 'ai' : 'player',
+          live.combos.hostDeclared,
+          live.combos.guestDeclared,
           winnerRole === 'host' ? 'player' : 'ai',
-          { player: live.hostBlotDeclared, ai: live.guestBlotDeclared },
-          live.allCombinationsDisabled
+          { player: live.flags.hostBlot, ai: live.flags.guestBlot },
+          live.config.allCombinationsDisabled
         );
 
         if (result.isBait) {
@@ -790,7 +917,8 @@ export const onlineResolveTrick = async (room: OnlineRoomDoc): Promise<void> => 
 
         hostScore += hostRoundScore;
         guestScore += guestRoundScore;
-        const isGameOver = hostScore >= live.gameLimit || guestScore >= live.gameLimit;
+        const isGameOver =
+          hostScore >= live.config.gameLimit || guestScore >= live.config.gameLimit;
         phase = isGameOver ? 'GAME_OVER' : 'RESULT';
         status = isGameOver ? 'finished' : 'playing';
         if (isGameOver) {
@@ -805,19 +933,28 @@ export const onlineResolveTrick = async (room: OnlineRoomDoc): Promise<void> => 
       }
 
       tx.update(ref, {
-        playedCards: newPlayedCards,
-        trickHostCard: null,
-        trickGuestCard: null,
-        turnRole: winnerRole,
-        lastWinnerRole: winnerRole,
-        hostRoundScore,
-        guestRoundScore,
-        hostScore,
-        guestScore,
-        phase,
         status,
         winnerUid,
-        roundBreakdown,
+        round: {
+          ...live.round,
+          turnRole: winnerRole,
+          lastWinnerRole: winnerRole,
+          phase,
+        },
+        scores: {
+          ...live.scores,
+          hostRoundScore,
+          guestRoundScore,
+          hostScore,
+          guestScore,
+        },
+        board: {
+          ...live.board,
+          playedCards: newPlayedCards,
+          trickHostCard: null,
+          trickGuestCard: null,
+          roundBreakdown,
+        },
         updatedAt: serverTimestamp(),
       });
     });
@@ -854,8 +991,11 @@ export const onlineForfeitRoom = async (
       const winnerUid = myRole === 'host' ? live.guestUid : live.hostUid;
       tx.update(ref, {
         status: 'finished',
-        phase: 'GAME_OVER',
         winnerUid: winnerUid || live.hostUid,
+        round: {
+          ...live.round,
+          phase: 'GAME_OVER',
+        },
         updatedAt: serverTimestamp(),
       });
     });

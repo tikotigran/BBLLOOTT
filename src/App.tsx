@@ -48,6 +48,7 @@ import {
   OnlineRoomDoc,
   UserProfile,
   WAITING_ROOM_HEARTBEAT_MS,
+  getRoomErrorMessage,
   isWaitingRoomActive,
   sanitizeRoomCode,
 } from './utils/firestorePayloads';
@@ -210,54 +211,6 @@ const suitGlyph = (suit: Suit | TrumpType) => {
   }
 };
 
-const getRoomErrorMessage = (error: unknown, fallback: string): string => {
-  const errorRecord =
-    typeof error === 'object' && error !== null
-      ? (error as { code?: unknown; message?: unknown })
-      : null;
-  const code = typeof errorRecord?.code === 'string' ? errorRecord.code : '';
-  let message =
-    typeof errorRecord?.message === 'string'
-      ? errorRecord.message
-      : typeof error === 'string'
-        ? error
-        : '';
-
-  let parsedOp = '';
-  let parsedPath = '';
-  let emailVerified: boolean | null = null;
-  try {
-    const parsed = JSON.parse(message) as {
-      error?: unknown;
-      operationType?: unknown;
-      path?: unknown;
-      authInfo?: { emailVerified?: unknown };
-    };
-    if (typeof parsed.error === 'string') message = parsed.error;
-    if (typeof parsed.operationType === 'string') parsedOp = parsed.operationType;
-    if (typeof parsed.path === 'string') parsedPath = parsed.path;
-    if (typeof parsed.authInfo?.emailVerified === 'boolean') {
-      emailVerified = parsed.authInfo.emailVerified;
-    }
-  } catch {
-    // Firebase errors can also arrive as plain messages.
-  }
-
-  const details = `${code} ${message}`.toLowerCase();
-  if (details.includes('permission-denied') || details.includes('missing or insufficient permissions')) {
-    const opTag = parsedOp && parsedPath ? ` (${parsedOp}: ${parsedPath})` : '';
-    if (emailVerified === false) {
-      return `Аккаунт Google не подтверждён${opTag}. Войдите через подтверждённый аккаунт Google.`;
-    }
-    return `Нет доступа к столу${opTag}. Убедитесь, что стол ещё открыт и оба игрока вошли через Google.`;
-  }
-  if (details.includes('unavailable') || details.includes('offline') || details.includes('network')) {
-    return 'Не удалось связаться с сервером. Проверьте интернет и попробуйте ещё раз.';
-  }
-
-  return message && message.length < 180 ? message : fallback;
-};
-
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<'LOBBY' | 'GAME'>(() => {
     if (typeof window !== 'undefined') {
@@ -295,6 +248,7 @@ export default function App() {
   const [waitingRooms, setWaitingRooms] = useState<OnlineRoomDoc[]>([]);
   const [presenceNowMs, setPresenceNowMs] = useState<number>(() => Date.now());
   const [roomListError, setRoomListError] = useState<string | null>(null);
+  const [roomActionError, setRoomActionError] = useState<string | null>(null);
   const [roomListVersion, setRoomListVersion] = useState(0);
   const [roomAction, setRoomAction] = useState<'creating' | 'joining' | null>(null);
   const [onlineRoomCode, setOnlineRoomCode] = useState<string | null>(null);
@@ -546,7 +500,7 @@ export default function App() {
       isOnline &&
       onlineRoom &&
       onlineRoom.status === 'playing' &&
-      onlineRoom.roundNumber === 0 &&
+      onlineRoom.round.roundNumber === 0 &&
       myRole === 'host'
     ) {
       const key = `${onlineRoom.roomCode}-0`;
@@ -556,7 +510,7 @@ export default function App() {
         dealingRoomRef.current = null;
         showToast(getRoomErrorMessage(err, 'Не удалось раздать карты.'));
       });
-    } else if (!onlineRoom || onlineRoom.roundNumber > 0) {
+    } else if (!onlineRoom || onlineRoom.round.roundNumber > 0) {
       dealingRoomRef.current = null;
     }
   }, [isOnline, onlineRoom, myRole, showToast]);
@@ -567,16 +521,16 @@ export default function App() {
       isOnline &&
       onlineRoom &&
       firebaseUser &&
-      onlineRoom.pendingExtraDrawRole === myRole
+      onlineRoom.round.pendingExtraDrawRole === myRole
     ) {
-      const key = `${onlineRoom.roomCode}-${onlineRoom.roundNumber}-${myRole}`;
+      const key = `${onlineRoom.roomCode}-${onlineRoom.round.roundNumber}-${myRole}`;
       if (extraDrawRoomRef.current === key) return;
       extraDrawRoomRef.current = key;
       void onlineDrawExtraCards(onlineRoom, myRole, firebaseUser.uid, onlineHand).catch((err) => {
         extraDrawRoomRef.current = null;
         showToast(getRoomErrorMessage(err, 'Не удалось добрать карты.'));
       });
-    } else if (!onlineRoom?.pendingExtraDrawRole) {
+    } else if (!onlineRoom?.round.pendingExtraDrawRole) {
       extraDrawRoomRef.current = null;
     }
   }, [isOnline, onlineRoom, firebaseUser, myRole, onlineHand, showToast]);
@@ -587,8 +541,8 @@ export default function App() {
       isOnline &&
       onlineRoom &&
       myRole === 'host' &&
-      onlineRoom.trickHostCard &&
-      onlineRoom.trickGuestCard
+      onlineRoom.board.trickHostCard &&
+      onlineRoom.board.trickGuestCard
     ) {
       const timer = setTimeout(() => {
         void onlineResolveTrick(onlineRoom).catch((err) => {
@@ -603,41 +557,43 @@ export default function App() {
     if (!isOnline || !onlineRoom) return state;
 
     const otherRole: RoomRole = myRole === 'host' ? 'guest' : 'host';
-    const oppCount = myRole === 'host' ? onlineRoom.guestCardCount : onlineRoom.hostCardCount;
+    const oppCount =
+      myRole === 'host' ? onlineRoom.scores.guestCardCount : onlineRoom.scores.hostCardCount;
     const oppPlaceholders: CardType[] = Array.from({ length: oppCount }, (_, i) => ({
       id: `opp-${i}`,
       suit: Suit.SPADES,
       rank: Rank.NINE,
     }));
 
-    const trumpVal = (onlineRoom.trump || null) as TrumpType | null;
+    const trumpVal = (onlineRoom.round.trump || null) as TrumpType | null;
     const myCombos = trumpVal
       ? detectCombos(
           onlineHand,
           trumpVal,
-          onlineRoom.allowHighCombos,
-          onlineRoom.allCombinationsDisabled
+          onlineRoom.config.allowHighCombos,
+          onlineRoom.config.allCombinationsDisabled
         )
       : [];
 
-    const mappedBreakdown = onlineRoom.roundBreakdown
+    const breakdown = onlineRoom.board.roundBreakdown;
+    const mappedBreakdown = breakdown
       ? {
           player: (myRole === 'host'
-            ? onlineRoom.roundBreakdown.host
-            : onlineRoom.roundBreakdown.guest) as GameState['roundBreakdown'] extends infer T
+            ? breakdown.host
+            : breakdown.guest) as GameState['roundBreakdown'] extends infer T
             ? T extends { player: infer P }
               ? P
               : never
             : never,
           ai: (myRole === 'host'
-            ? onlineRoom.roundBreakdown.guest
-            : onlineRoom.roundBreakdown.host) as GameState['roundBreakdown'] extends infer T
+            ? breakdown.guest
+            : breakdown.host) as GameState['roundBreakdown'] extends infer T
             ? T extends { ai: infer A }
               ? A
               : never
             : never,
-          isBait: onlineRoom.roundBreakdown.isBait,
-          bidder: (onlineRoom.roundBreakdown.bidderRole === myRole ? 'player' : 'ai') as
+          isBait: breakdown.isBait,
+          bidder: (breakdown.bidderRole === myRole ? 'player' : 'ai') as
             | 'player'
             | 'ai',
         }
@@ -646,9 +602,9 @@ export default function App() {
     return {
       playerHand: onlineHand,
       aiHand: oppPlaceholders,
-      deck: onlineRoom.deck,
-      offeredCard: onlineRoom.offeredCard,
-      playedCards: onlineRoom.playedCards.map((t) => ({
+      deck: onlineRoom.board.deck,
+      offeredCard: onlineRoom.board.offeredCard,
+      playedCards: onlineRoom.board.playedCards.map((t) => ({
         player: myRole === 'host' ? t.host : t.guest,
         ai: myRole === 'host' ? t.guest : t.host,
         winner: t.winnerRole === myRole ? 'player' : 'ai',
@@ -656,31 +612,31 @@ export default function App() {
       currentTrick: {
         player:
           myRole === 'host'
-            ? onlineRoom.trickHostCard || undefined
-            : onlineRoom.trickGuestCard || undefined,
+            ? onlineRoom.board.trickHostCard || undefined
+            : onlineRoom.board.trickGuestCard || undefined,
         ai:
           myRole === 'host'
-            ? onlineRoom.trickGuestCard || undefined
-            : onlineRoom.trickHostCard || undefined,
+            ? onlineRoom.board.trickGuestCard || undefined
+            : onlineRoom.board.trickHostCard || undefined,
       },
       trump: trumpVal,
-      bidder: onlineRoom.bidderRole
-        ? onlineRoom.bidderRole === myRole
+      bidder: onlineRoom.round.bidderRole
+        ? onlineRoom.round.bidderRole === myRole
           ? 'player'
           : 'ai'
         : null,
-      playerScore: myRole === 'host' ? onlineRoom.hostScore : onlineRoom.guestScore,
-      aiScore: myRole === 'host' ? onlineRoom.guestScore : onlineRoom.hostScore,
+      playerScore: myRole === 'host' ? onlineRoom.scores.hostScore : onlineRoom.scores.guestScore,
+      aiScore: myRole === 'host' ? onlineRoom.scores.guestScore : onlineRoom.scores.hostScore,
       playerRoundScore:
-        myRole === 'host' ? onlineRoom.hostRoundScore : onlineRoom.guestRoundScore,
+        myRole === 'host' ? onlineRoom.scores.hostRoundScore : onlineRoom.scores.guestRoundScore,
       aiRoundScore:
-        myRole === 'host' ? onlineRoom.guestRoundScore : onlineRoom.hostRoundScore,
+        myRole === 'host' ? onlineRoom.scores.guestRoundScore : onlineRoom.scores.hostRoundScore,
       roundBreakdown: mappedBreakdown,
-      dealer: onlineRoom.dealerRole === myRole ? 'player' : 'ai',
-      turn: onlineRoom.turnRole === myRole ? 'player' : 'ai',
-      phase: onlineRoom.phase,
-      lastWinner: onlineRoom.lastWinnerRole
-        ? onlineRoom.lastWinnerRole === myRole
+      dealer: onlineRoom.round.dealerRole === myRole ? 'player' : 'ai',
+      turn: onlineRoom.round.turnRole === myRole ? 'player' : 'ai',
+      phase: onlineRoom.round.phase,
+      lastWinner: onlineRoom.round.lastWinnerRole
+        ? onlineRoom.round.lastWinnerRole === myRole
           ? 'player'
           : 'ai'
         : null,
@@ -688,63 +644,63 @@ export default function App() {
       announcedCombos: {
         player:
           myRole === 'host'
-            ? onlineRoom.hostAnnouncedCombos
-            : onlineRoom.guestAnnouncedCombos,
+            ? onlineRoom.combos.hostAnnounced
+            : onlineRoom.combos.guestAnnounced,
         ai:
           otherRole === 'host'
-            ? onlineRoom.hostAnnouncedCombos
-            : onlineRoom.guestAnnouncedCombos,
+            ? onlineRoom.combos.hostAnnounced
+            : onlineRoom.combos.guestAnnounced,
       },
       declaredCombos: {
         player:
           myRole === 'host'
-            ? onlineRoom.hostDeclaredCombos
-            : onlineRoom.guestDeclaredCombos,
+            ? onlineRoom.combos.hostDeclared
+            : onlineRoom.combos.guestDeclared,
         ai:
           otherRole === 'host'
-            ? onlineRoom.hostDeclaredCombos
-            : onlineRoom.guestDeclaredCombos,
+            ? onlineRoom.combos.hostDeclared
+            : onlineRoom.combos.guestDeclared,
       },
       hasShownCombos: {
         player:
           myRole === 'host'
-            ? onlineRoom.hostHasShownCombos
-            : onlineRoom.guestHasShownCombos,
+            ? onlineRoom.flags.hostHasShown
+            : onlineRoom.flags.guestHasShown,
         ai:
           otherRole === 'host'
-            ? onlineRoom.hostHasShownCombos
-            : onlineRoom.guestHasShownCombos,
+            ? onlineRoom.flags.hostHasShown
+            : onlineRoom.flags.guestHasShown,
       },
       hasConfirmedGrowth: { player: true, ai: true },
       canDeclare: {
         player:
-          myRole === 'host' ? onlineRoom.hostCanDeclare : onlineRoom.guestCanDeclare,
-        ai: otherRole === 'host' ? onlineRoom.hostCanDeclare : onlineRoom.guestCanDeclare,
+          myRole === 'host' ? onlineRoom.flags.hostCanDeclare : onlineRoom.flags.guestCanDeclare,
+        ai: otherRole === 'host' ? onlineRoom.flags.hostCanDeclare : onlineRoom.flags.guestCanDeclare,
       },
       canShow: {
-        player: myRole === 'host' ? onlineRoom.hostCanShow : onlineRoom.guestCanShow,
-        ai: otherRole === 'host' ? onlineRoom.hostCanShow : onlineRoom.guestCanShow,
+        player: myRole === 'host' ? onlineRoom.flags.hostCanShow : onlineRoom.flags.guestCanShow,
+        ai: otherRole === 'host' ? onlineRoom.flags.hostCanShow : onlineRoom.flags.guestCanShow,
       },
       isShowingCombo: false,
-      isFirstDeal: onlineRoom.playedCards.length === 0,
+      isFirstDeal: onlineRoom.board.playedCards.length === 0,
       blotDeclared: {
         player:
-          myRole === 'host' ? onlineRoom.hostBlotDeclared : onlineRoom.guestBlotDeclared,
+          myRole === 'host' ? onlineRoom.flags.hostBlot : onlineRoom.flags.guestBlot,
         ai:
           otherRole === 'host'
-            ? onlineRoom.hostBlotDeclared
-            : onlineRoom.guestBlotDeclared,
+            ? onlineRoom.flags.hostBlot
+            : onlineRoom.flags.guestBlot,
       },
-      allowHighCombos: onlineRoom.allowHighCombos,
-      allCombinationsDisabled: onlineRoom.allCombinationsDisabled,
-      gameLimit: onlineRoom.gameLimit,
-      betAmount: onlineRoom.betAmount,
-      roundNumber: Math.max(1, onlineRoom.roundNumber),
+      allowHighCombos: onlineRoom.config.allowHighCombos,
+      allCombinationsDisabled: onlineRoom.config.allCombinationsDisabled,
+      gameLimit: onlineRoom.config.gameLimit,
+      betAmount: onlineRoom.config.betAmount,
+      roundNumber: Math.max(1, onlineRoom.round.roundNumber),
       timeLeft: state.timeLeft,
-      turnTimeLimit: onlineRoom.turnTimeLimit,
+      turnTimeLimit: onlineRoom.config.turnTimeLimit,
       playerTimeBank: 180,
       aiTimeBank: 180,
-      tableId: onlineRoom.tableId,
+      tableId: onlineRoom.config.tableId,
     };
   }, [isOnline, onlineRoom, myRole, onlineHand, state]);
 
@@ -841,7 +797,7 @@ export default function App() {
 
       if (!override && isOnline && onlineRoom) {
         if (myRole === 'host') {
-          void dealOnlineRound(onlineRoom, onlineRoom.phase === 'GAME_OVER').catch((err) => {
+          void dealOnlineRound(onlineRoom, onlineRoom.round.phase === 'GAME_OVER').catch((err) => {
             showToast(getRoomErrorMessage(err, 'Не удалось начать следующий раунд.'));
           });
         }
@@ -1943,9 +1899,23 @@ export default function App() {
 
   const handleCreateOnlineGame = async () => {
     if (roomAction) return;
-    if (!firebaseUser || !userProfile?.registrationComplete) {
+    setRoomActionError(null);
+    if (!authReady && typeof auth.authStateReady === 'function') {
+      await auth.authStateReady();
+    }
+    const activeAuthUser = auth.currentUser || firebaseUser;
+    if (!activeAuthUser) {
       setAuthModalOpen(true);
-      showToast('Войдите через Google и завершите регистрацию профиля, чтобы создать стол');
+      const msg = 'Вы не вошли в аккаунт Google (auth.currentUser == null). Войдите, чтобы создать стол.';
+      setRoomActionError(msg);
+      showToast(msg);
+      return;
+    }
+    if (!userProfile?.registrationComplete) {
+      setAuthModalOpen(true);
+      const msg = 'Завершите регистрацию игрового профиля перед созданием стола.';
+      setRoomActionError(msg);
+      showToast(msg);
       return;
     }
     setRoomAction('creating');
@@ -1962,8 +1932,14 @@ export default function App() {
       setCurrentScreen('GAME');
       setCopiedInvite(false);
       setRoomListError(null);
+      setRoomActionError(null);
     } catch (err) {
-      showToast(getRoomErrorMessage(err, 'Не удалось создать стол. Проверьте подключение и попробуйте снова.'));
+      const detailedMsg = getRoomErrorMessage(
+        err,
+        'Не удалось создать стол. Проверьте авторизацию Google, правила Firestore и подключение.'
+      );
+      setRoomActionError(detailedMsg);
+      showToast(detailedMsg);
     } finally {
       setRoomAction(null);
     }
@@ -1971,19 +1947,26 @@ export default function App() {
 
   const handleJoinOnlineByCode = async (rawCode: string) => {
     if (roomAction) return;
+    setRoomActionError(null);
     const clean = sanitizeRoomCode(rawCode);
     if (clean.length < 4) {
       showToast('Введите код стола друга (минимум 4 символа).');
       return;
     }
-    if (!firebaseUser || !userProfile?.registrationComplete) {
+    if (!authReady && typeof auth.authStateReady === 'function') {
+      await auth.authStateReady();
+    }
+    const activeAuthUser = auth.currentUser || firebaseUser;
+    if (!activeAuthUser || !userProfile?.registrationComplete) {
       setPendingInviteCode(clean);
       setAuthModalOpen(true);
-      showToast('Войдите через Google и завершите регистрацию, чтобы присоединиться');
+      const msg = 'Войдите через Google и завершите регистрацию, чтобы присоединиться';
+      setRoomActionError(msg);
+      showToast(msg);
       return;
     }
     const matchedOwn = activeWaitingRooms.find(
-      (r) => r.roomCode === clean && r.hostUid === firebaseUser.uid
+      (r) => r.roomCode === clean && r.hostUid === activeAuthUser.uid
     );
     if (matchedOwn) {
       handleOpenOwnRoom(clean);
@@ -1995,9 +1978,15 @@ export default function App() {
       enterGameImmersiveMode();
       setOnlineRoomCode(code);
       setCurrentScreen('GAME');
+      setRoomActionError(null);
       showToast(`Подключено к столу ${code}`);
     } catch (err) {
-      showToast(getRoomErrorMessage(err, 'Не удалось войти в стол. Проверьте код и попробуйте снова.'));
+      const detailedMsg = getRoomErrorMessage(
+        err,
+        'Не удалось войти в стол. Проверьте код и попробуйте снова.'
+      );
+      setRoomActionError(detailedMsg);
+      showToast(detailedMsg);
     } finally {
       setRoomAction(null);
     }
@@ -2075,7 +2064,9 @@ export default function App() {
           isSignedIn={Boolean(firebaseUser)}
           waitingRooms={activeWaitingRooms}
           roomsError={roomListError}
+          roomActionError={roomActionError}
           onRetryRooms={() => setRoomListVersion((version) => version + 1)}
+          onDismissRoomActionError={() => setRoomActionError(null)}
           roomAction={roomAction}
           botsEnabled={settings.botsEnabled}
           initialJoinCode={pendingInviteCode}

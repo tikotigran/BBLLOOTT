@@ -20,18 +20,20 @@ service cloud.firestore {
 
     function isRecentServerTime(ts) {
       return ts is timestamp
-        && ts >= request.time - duration.value(60, 's')
-        && ts <= request.time + duration.value(60, 's');
+        && ts >= request.time - duration.value(120, 's')
+        && ts <= request.time + duration.value(120, 's');
+    }
+
+    function isTimestampOrServerTime(ts) {
+      return ts == request.time || ts is timestamp;
     }
 
     function isIncomingServerTime(ts) {
-      return ts is timestamp
-        && (
-          ts == request.time
-          || (
-            ts >= request.time - duration.value(60, 's')
-            && ts <= request.time + duration.value(60, 's')
-          )
+      return ts == request.time
+        || (
+          ts is timestamp
+          && ts >= request.time - duration.value(60, 's')
+          && ts <= request.time + duration.value(60, 's')
         );
     }
 
@@ -84,52 +86,141 @@ service cloud.firestore {
         && data.gamesPlayed is number && data.gamesPlayed >= 0 && data.gamesPlayed <= 1000000
         && data.wins is number && data.wins >= 0 && data.wins <= data.gamesPlayed
         && data.registrationComplete is bool
-        && data.createdAt is timestamp
-        && data.updatedAt is timestamp;
+        && isTimestampOrServerTime(data.createdAt)
+        && isTimestampOrServerTime(data.updatedAt);
     }
 
-    // --- Validation Blueprint: GameRoom (split into focused helpers) ---
-    function isValidGameRoomKeys(data) {
+    // --- Validation Blueprint: GameRoom (compact 17 top-level keys + bounded sub-maps) ---
+    function isValidRoomConfig(cfg) {
+      return cfg is map
+        && cfg.keys().hasAll([
+          'tableId', 'gameLimit', 'betAmount',
+          'allowHighCombos', 'allCombinationsDisabled', 'turnTimeLimit'
+        ])
+        && cfg.keys().hasOnly([
+          'tableId', 'gameLimit', 'betAmount',
+          'allowHighCombos', 'allCombinationsDisabled', 'turnTimeLimit'
+        ])
+        && cfg.tableId is number && cfg.tableId >= 100000 && cfg.tableId <= 2147483647
+        && cfg.gameLimit is number && cfg.gameLimit in [51, 101, 151]
+        && cfg.betAmount is number && cfg.betAmount >= 1000 && cfg.betAmount <= 100000
+        && cfg.allowHighCombos is bool
+        && cfg.allCombinationsDisabled is bool
+        && cfg.turnTimeLimit is number && cfg.turnTimeLimit in [15, 20, 30];
+    }
+
+    function isValidRoomRound(rnd) {
+      return rnd is map
+        && rnd.keys().hasAll([
+          'roundNumber', 'dealerRole', 'turnRole', 'phase',
+          'trump', 'bidderRole', 'lastWinnerRole', 'pendingExtraDrawRole'
+        ])
+        && rnd.keys().hasOnly([
+          'roundNumber', 'dealerRole', 'turnRole', 'phase',
+          'trump', 'bidderRole', 'lastWinnerRole', 'pendingExtraDrawRole'
+        ])
+        && rnd.roundNumber is number && rnd.roundNumber >= 0 && rnd.roundNumber <= 100
+        && rnd.dealerRole is string && rnd.dealerRole.size() <= 8 && rnd.dealerRole in ['host', 'guest']
+        && rnd.turnRole is string && rnd.turnRole.size() <= 8 && rnd.turnRole in ['host', 'guest']
+        && rnd.phase is string && rnd.phase.size() <= 24
+        && rnd.phase in ['OFFERING_TRUMP', 'SUIT_SELECTION', 'PLAYING', 'RESULT', 'GAME_OVER']
+        && rnd.trump is string && rnd.trump.size() <= 16
+        && rnd.trump in ['', 'HEARTS', 'DIAMONDS', 'CLUBS', 'SPADES', 'NO_TRUMP']
+        && rnd.bidderRole is string && rnd.bidderRole.size() <= 8 && rnd.bidderRole in ['', 'host', 'guest']
+        && rnd.lastWinnerRole is string && rnd.lastWinnerRole.size() <= 8 && rnd.lastWinnerRole in ['', 'host', 'guest']
+        && rnd.pendingExtraDrawRole is string && rnd.pendingExtraDrawRole.size() <= 8 && rnd.pendingExtraDrawRole in ['', 'host', 'guest'];
+    }
+
+    function isValidRoomScores(sc) {
+      return sc is map
+        && sc.keys().hasAll([
+          'hostScore', 'guestScore', 'hostRoundScore',
+          'guestRoundScore', 'hostCardCount', 'guestCardCount'
+        ])
+        && sc.keys().hasOnly([
+          'hostScore', 'guestScore', 'hostRoundScore',
+          'guestRoundScore', 'hostCardCount', 'guestCardCount'
+        ])
+        && sc.hostScore is number && sc.hostScore >= 0 && sc.hostScore <= 1000
+        && sc.guestScore is number && sc.guestScore >= 0 && sc.guestScore <= 1000
+        && sc.hostRoundScore is number && sc.hostRoundScore >= 0 && sc.hostRoundScore <= 1000
+        && sc.guestRoundScore is number && sc.guestRoundScore >= 0 && sc.guestRoundScore <= 1000
+        && sc.hostCardCount is number && sc.hostCardCount >= 0 && sc.hostCardCount <= 8
+        && sc.guestCardCount is number && sc.guestCardCount >= 0 && sc.guestCardCount <= 8;
+    }
+
+    function isValidRoomBoard(brd) {
+      return brd is map
+        && brd.keys().hasAll([
+          'offeredCard', 'deck', 'trickHostCard',
+          'trickGuestCard', 'playedCards', 'roundBreakdown'
+        ])
+        && brd.keys().hasOnly([
+          'offeredCard', 'deck', 'trickHostCard',
+          'trickGuestCard', 'playedCards', 'roundBreakdown'
+        ])
+        && (brd.offeredCard == null || isValidCardMap(brd.offeredCard))
+        && brd.deck is list && brd.deck.size() <= 24
+        && (brd.deck.size() == 0 || isValidCardMap(brd.deck[0]))
+        && (brd.trickHostCard == null || isValidCardMap(brd.trickHostCard))
+        && (brd.trickGuestCard == null || isValidCardMap(brd.trickGuestCard))
+        && brd.playedCards is list && brd.playedCards.size() <= 8
+        && (brd.playedCards.size() == 0 || brd.playedCards[0] is map)
+        && (brd.roundBreakdown == null || (brd.roundBreakdown is map && brd.roundBreakdown.size() <= 6));
+    }
+
+    function isValidRoomCombos(cmb) {
+      return cmb is map
+        && cmb.keys().hasAll([
+          'hostAnnounced', 'guestAnnounced', 'hostDeclared', 'guestDeclared'
+        ])
+        && cmb.keys().hasOnly([
+          'hostAnnounced', 'guestAnnounced', 'hostDeclared', 'guestDeclared'
+        ])
+        && cmb.hostAnnounced is list && cmb.hostAnnounced.size() <= 4
+        && (cmb.hostAnnounced.size() == 0 || cmb.hostAnnounced[0] is map)
+        && cmb.guestAnnounced is list && cmb.guestAnnounced.size() <= 4
+        && (cmb.guestAnnounced.size() == 0 || cmb.guestAnnounced[0] is map)
+        && cmb.hostDeclared is list && cmb.hostDeclared.size() <= 4
+        && (cmb.hostDeclared.size() == 0 || cmb.hostDeclared[0] is map)
+        && cmb.guestDeclared is list && cmb.guestDeclared.size() <= 4
+        && (cmb.guestDeclared.size() == 0 || cmb.guestDeclared[0] is map);
+    }
+
+    function isValidRoomFlags(flg) {
+      return flg is map
+        && flg.keys().hasAll([
+          'hostHasShown', 'guestHasShown', 'hostCanDeclare', 'guestCanDeclare',
+          'hostCanShow', 'guestCanShow', 'hostBlot', 'guestBlot'
+        ])
+        && flg.keys().hasOnly([
+          'hostHasShown', 'guestHasShown', 'hostCanDeclare', 'guestCanDeclare',
+          'hostCanShow', 'guestCanShow', 'hostBlot', 'guestBlot'
+        ])
+        && flg.hostHasShown is bool
+        && flg.guestHasShown is bool
+        && flg.hostCanDeclare is bool
+        && flg.guestCanDeclare is bool
+        && flg.hostCanShow is bool
+        && flg.guestCanShow is bool
+        && flg.hostBlot is bool
+        && flg.guestBlot is bool;
+    }
+
+    function isValidGameRoom(data) {
       return data.keys().hasAll([
           'roomCode', 'hostUid', 'hostName', 'hostShortId',
-          'guestUid', 'guestName', 'guestShortId', 'status',
-          'tableId', 'gameLimit', 'betAmount', 'allowHighCombos',
-          'allCombinationsDisabled', 'turnTimeLimit', 'roundNumber',
-          'dealerRole', 'turnRole', 'phase', 'trump', 'bidderRole',
-          'lastWinnerRole', 'pendingExtraDrawRole', 'winnerUid',
-          'hostScore', 'guestScore', 'hostRoundScore', 'guestRoundScore',
-          'hostCardCount', 'guestCardCount', 'offeredCard', 'deck',
-          'trickHostCard', 'trickGuestCard', 'playedCards',
-          'hostAnnouncedCombos', 'guestAnnouncedCombos',
-          'hostDeclaredCombos', 'guestDeclaredCombos',
-          'hostHasShownCombos', 'guestHasShownCombos',
-          'hostCanDeclare', 'guestCanDeclare',
-          'hostCanShow', 'guestCanShow',
-          'hostBlotDeclared', 'guestBlotDeclared',
-          'roundBreakdown', 'createdAt', 'updatedAt'
+          'guestUid', 'guestName', 'guestShortId', 'status', 'winnerUid',
+          'config', 'round', 'scores', 'board', 'combos', 'flags',
+          'createdAt', 'updatedAt'
         ])
         && data.keys().hasOnly([
           'roomCode', 'hostUid', 'hostName', 'hostShortId',
-          'guestUid', 'guestName', 'guestShortId', 'status',
-          'tableId', 'gameLimit', 'betAmount', 'allowHighCombos',
-          'allCombinationsDisabled', 'turnTimeLimit', 'roundNumber',
-          'dealerRole', 'turnRole', 'phase', 'trump', 'bidderRole',
-          'lastWinnerRole', 'pendingExtraDrawRole', 'winnerUid',
-          'hostScore', 'guestScore', 'hostRoundScore', 'guestRoundScore',
-          'hostCardCount', 'guestCardCount', 'offeredCard', 'deck',
-          'trickHostCard', 'trickGuestCard', 'playedCards',
-          'hostAnnouncedCombos', 'guestAnnouncedCombos',
-          'hostDeclaredCombos', 'guestDeclaredCombos',
-          'hostHasShownCombos', 'guestHasShownCombos',
-          'hostCanDeclare', 'guestCanDeclare',
-          'hostCanShow', 'guestCanShow',
-          'hostBlotDeclared', 'guestBlotDeclared',
-          'roundBreakdown', 'createdAt', 'updatedAt'
-        ]);
-    }
-
-    function isValidGameRoomMeta(data) {
-      return isValidRoomCode(data.roomCode)
+          'guestUid', 'guestName', 'guestShortId', 'status', 'winnerUid',
+          'config', 'round', 'scores', 'board', 'combos', 'flags',
+          'createdAt', 'updatedAt'
+        ])
+        && isValidRoomCode(data.roomCode)
         && isValidId(data.hostUid)
         && data.hostName is string && data.hostName.size() >= 1 && data.hostName.size() <= 24
         && isValidShortId(data.hostShortId)
@@ -138,68 +229,15 @@ service cloud.firestore {
         && isValidOptionalShortId(data.guestShortId)
         && data.status is string && data.status.size() <= 16
         && data.status in ['waiting', 'playing', 'finished']
-        && data.tableId is number && data.tableId >= 100000 && data.tableId <= 9999999999
-        && data.gameLimit is number && data.gameLimit in [51, 101, 151]
-        && data.betAmount is number && data.betAmount >= 1000 && data.betAmount <= 100000
-        && data.allowHighCombos is bool
-        && data.allCombinationsDisabled is bool
-        && data.turnTimeLimit is number && data.turnTimeLimit in [15, 20, 30];
-    }
-
-    function isValidGameRoomState(data) {
-      return data.roundNumber is number && data.roundNumber >= 0 && data.roundNumber <= 100
-        && data.dealerRole is string && data.dealerRole.size() <= 8 && data.dealerRole in ['host', 'guest']
-        && data.turnRole is string && data.turnRole.size() <= 8 && data.turnRole in ['host', 'guest']
-        && data.phase is string && data.phase.size() <= 24
-        && data.phase in ['OFFERING_TRUMP', 'SUIT_SELECTION', 'PLAYING', 'RESULT', 'GAME_OVER']
-        && data.trump is string && data.trump.size() <= 16
-        && data.trump in ['', 'HEARTS', 'DIAMONDS', 'CLUBS', 'SPADES', 'NO_TRUMP']
-        && data.bidderRole is string && data.bidderRole.size() <= 8 && data.bidderRole in ['', 'host', 'guest']
-        && data.lastWinnerRole is string && data.lastWinnerRole.size() <= 8 && data.lastWinnerRole in ['', 'host', 'guest']
-        && data.pendingExtraDrawRole is string && data.pendingExtraDrawRole.size() <= 8 && data.pendingExtraDrawRole in ['', 'host', 'guest']
         && isValidOptionalId(data.winnerUid)
-        && data.hostScore is number && data.hostScore >= 0 && data.hostScore <= 1000
-        && data.guestScore is number && data.guestScore >= 0 && data.guestScore <= 1000
-        && data.hostRoundScore is number && data.hostRoundScore >= 0 && data.hostRoundScore <= 1000
-        && data.guestRoundScore is number && data.guestRoundScore >= 0 && data.guestRoundScore <= 1000
-        && data.hostCardCount is number && data.hostCardCount >= 0 && data.hostCardCount <= 8
-        && data.guestCardCount is number && data.guestCardCount >= 0 && data.guestCardCount <= 8;
-    }
-
-    function isValidGameRoomArrays(data) {
-      return (data.offeredCard == null || isValidCardMap(data.offeredCard))
-        && data.deck is list && data.deck.size() <= 24
-        && (data.deck.size() == 0 || isValidCardMap(data.deck[0]))
-        && (data.trickHostCard == null || isValidCardMap(data.trickHostCard))
-        && (data.trickGuestCard == null || isValidCardMap(data.trickGuestCard))
-        && data.playedCards is list && data.playedCards.size() <= 8
-        && (data.playedCards.size() == 0 || data.playedCards[0] is map)
-        && data.hostAnnouncedCombos is list && data.hostAnnouncedCombos.size() <= 4
-        && (data.hostAnnouncedCombos.size() == 0 || data.hostAnnouncedCombos[0] is map)
-        && data.guestAnnouncedCombos is list && data.guestAnnouncedCombos.size() <= 4
-        && (data.guestAnnouncedCombos.size() == 0 || data.guestAnnouncedCombos[0] is map)
-        && data.hostDeclaredCombos is list && data.hostDeclaredCombos.size() <= 4
-        && (data.hostDeclaredCombos.size() == 0 || data.hostDeclaredCombos[0] is map)
-        && data.guestDeclaredCombos is list && data.guestDeclaredCombos.size() <= 4
-        && (data.guestDeclaredCombos.size() == 0 || data.guestDeclaredCombos[0] is map)
-        && data.hostHasShownCombos is bool
-        && data.guestHasShownCombos is bool
-        && data.hostCanDeclare is bool
-        && data.guestCanDeclare is bool
-        && data.hostCanShow is bool
-        && data.guestCanShow is bool
-        && data.hostBlotDeclared is bool
-        && data.guestBlotDeclared is bool
-        && (data.roundBreakdown == null || (data.roundBreakdown is map && data.roundBreakdown.size() <= 6))
-        && data.createdAt is timestamp
-        && data.updatedAt is timestamp;
-    }
-
-    function isValidGameRoom(data) {
-      return isValidGameRoomKeys(data)
-        && isValidGameRoomMeta(data)
-        && isValidGameRoomState(data)
-        && isValidGameRoomArrays(data);
+        && isValidRoomConfig(data.config)
+        && isValidRoomRound(data.round)
+        && isValidRoomScores(data.scores)
+        && isValidRoomBoard(data.board)
+        && isValidRoomCombos(data.combos)
+        && isValidRoomFlags(data.flags)
+        && isTimestampOrServerTime(data.createdAt)
+        && isTimestampOrServerTime(data.updatedAt);
     }
 
     // --- Validation Blueprint: PlayerHand ---
@@ -212,7 +250,7 @@ service cloud.firestore {
         && data.roomId == roomId
         && data.cards is list && data.cards.size() <= 8
         && (data.cards.size() == 0 || isValidCardMap(data.cards[0]))
-        && data.updatedAt is timestamp;
+        && isTimestampOrServerTime(data.updatedAt);
     }
 
     // Global Safety Net (Default Deny)
@@ -272,12 +310,7 @@ service cloud.firestore {
         && incoming().roomCode == existing().roomCode
         && incoming().hostUid == existing().hostUid
         && incoming().hostShortId == existing().hostShortId
-        && incoming().tableId == existing().tableId
-        && incoming().gameLimit == existing().gameLimit
-        && incoming().betAmount == existing().betAmount
-        && incoming().allowHighCombos == existing().allowHighCombos
-        && incoming().allCombinationsDisabled == existing().allCombinationsDisabled
-        && incoming().turnTimeLimit == existing().turnTimeLimit
+        && incoming().config == existing().config
         && !incoming().diff(existing()).affectedKeys().hasAny(['createdAt'])
         && isIncomingServerTime(incoming().updatedAt)
         && (
@@ -303,18 +336,7 @@ service cloud.firestore {
             && incoming().guestShortId == existing().guestShortId
             && incoming().status in ['playing', 'finished']
             && incoming().diff(existing()).affectedKeys().hasOnly([
-              'status', 'roundNumber', 'dealerRole', 'turnRole', 'phase', 'trump',
-              'bidderRole', 'lastWinnerRole', 'pendingExtraDrawRole', 'winnerUid',
-              'hostScore', 'guestScore', 'hostRoundScore', 'guestRoundScore',
-              'hostCardCount', 'guestCardCount', 'offeredCard', 'deck',
-              'trickHostCard', 'trickGuestCard', 'playedCards',
-              'hostAnnouncedCombos', 'guestAnnouncedCombos',
-              'hostDeclaredCombos', 'guestDeclaredCombos',
-              'hostHasShownCombos', 'guestHasShownCombos',
-              'hostCanDeclare', 'guestCanDeclare',
-              'hostCanShow', 'guestCanShow',
-              'hostBlotDeclared', 'guestBlotDeclared',
-              'roundBreakdown', 'updatedAt'
+              'status', 'winnerUid', 'round', 'scores', 'board', 'combos', 'flags', 'updatedAt'
             ])
           )
           ||

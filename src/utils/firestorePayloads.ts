@@ -15,6 +15,27 @@ export interface UserProfile {
   updatedAt?: unknown;
 }
 
+export interface RoomRoundBreakdown {
+  host: {
+    tricks: number;
+    combos: { type: string; points: number; highRank?: string }[];
+    total: number;
+    finalPaper: number;
+    originalTricks: number;
+    originalCombos: { type: string; points: number; highRank?: string }[];
+  };
+  guest: {
+    tricks: number;
+    combos: { type: string; points: number; highRank?: string }[];
+    total: number;
+    finalPaper: number;
+    originalTricks: number;
+    originalCombos: { type: string; points: number; highRank?: string }[];
+  };
+  isBait: boolean;
+  bidderRole: 'host' | 'guest';
+}
+
 export interface OnlineRoomDoc {
   roomCode: string;
   hostUid: string;
@@ -24,64 +45,57 @@ export interface OnlineRoomDoc {
   guestName: string;
   guestShortId: string;
   status: 'waiting' | 'playing' | 'finished';
-  tableId: number;
-  gameLimit: number;
-  betAmount: number;
-  allowHighCombos: boolean;
-  allCombinationsDisabled: boolean;
-  turnTimeLimit: number;
-  roundNumber: number;
-  dealerRole: 'host' | 'guest';
-  turnRole: 'host' | 'guest';
-  phase: GamePhase;
-  trump: '' | TrumpType;
-  bidderRole: '' | 'host' | 'guest';
-  lastWinnerRole: '' | 'host' | 'guest';
-  pendingExtraDrawRole: '' | 'host' | 'guest';
   winnerUid: string;
-  hostScore: number;
-  guestScore: number;
-  hostRoundScore: number;
-  guestRoundScore: number;
-  hostCardCount: number;
-  guestCardCount: number;
-  offeredCard: Card | null;
-  deck: Card[];
-  trickHostCard: Card | null;
-  trickGuestCard: Card | null;
-  playedCards: { host: Card; guest: Card; winnerRole: 'host' | 'guest' }[];
-  hostAnnouncedCombos: Combination[];
-  guestAnnouncedCombos: Combination[];
-  hostDeclaredCombos: Combination[];
-  guestDeclaredCombos: Combination[];
-  hostHasShownCombos: boolean;
-  guestHasShownCombos: boolean;
-  hostCanDeclare: boolean;
-  guestCanDeclare: boolean;
-  hostCanShow: boolean;
-  guestCanShow: boolean;
-  hostBlotDeclared: boolean;
-  guestBlotDeclared: boolean;
-  roundBreakdown: {
-    host: {
-      tricks: number;
-      combos: { type: string; points: number; highRank?: string }[];
-      total: number;
-      finalPaper: number;
-      originalTricks: number;
-      originalCombos: { type: string; points: number; highRank?: string }[];
-    };
-    guest: {
-      tricks: number;
-      combos: { type: string; points: number; highRank?: string }[];
-      total: number;
-      finalPaper: number;
-      originalTricks: number;
-      originalCombos: { type: string; points: number; highRank?: string }[];
-    };
-    isBait: boolean;
-    bidderRole: 'host' | 'guest';
-  } | null;
+  config: {
+    tableId: number;
+    gameLimit: number;
+    betAmount: number;
+    allowHighCombos: boolean;
+    allCombinationsDisabled: boolean;
+    turnTimeLimit: number;
+  };
+  round: {
+    roundNumber: number;
+    dealerRole: 'host' | 'guest';
+    turnRole: 'host' | 'guest';
+    phase: GamePhase;
+    trump: '' | TrumpType;
+    bidderRole: '' | 'host' | 'guest';
+    lastWinnerRole: '' | 'host' | 'guest';
+    pendingExtraDrawRole: '' | 'host' | 'guest';
+  };
+  scores: {
+    hostScore: number;
+    guestScore: number;
+    hostRoundScore: number;
+    guestRoundScore: number;
+    hostCardCount: number;
+    guestCardCount: number;
+  };
+  board: {
+    offeredCard: Card | null;
+    deck: Card[];
+    trickHostCard: Card | null;
+    trickGuestCard: Card | null;
+    playedCards: { host: Card; guest: Card; winnerRole: 'host' | 'guest' }[];
+    roundBreakdown: RoomRoundBreakdown | null;
+  };
+  combos: {
+    hostAnnounced: Combination[];
+    guestAnnounced: Combination[];
+    hostDeclared: Combination[];
+    guestDeclared: Combination[];
+  };
+  flags: {
+    hostHasShown: boolean;
+    guestHasShown: boolean;
+    hostCanDeclare: boolean;
+    guestCanDeclare: boolean;
+    hostCanShow: boolean;
+    guestCanShow: boolean;
+    hostBlot: boolean;
+    guestBlot: boolean;
+  };
   createdAt?: unknown;
   updatedAt?: unknown;
 }
@@ -124,6 +138,22 @@ export function isWaitingRoomActive(
   const tsMs = getTimestampMillis(room.updatedAt) ?? getTimestampMillis(room.createdAt);
   if (tsMs === null) return true;
   return nowMs - tsMs <= ttlMs;
+}
+
+export function isValidOnlineRoomShape(doc: unknown): doc is OnlineRoomDoc {
+  if (!doc || typeof doc !== 'object') return false;
+  const r = doc as Partial<OnlineRoomDoc>;
+  return Boolean(
+    typeof r.roomCode === 'string' &&
+      typeof r.hostUid === 'string' &&
+      r.config &&
+      typeof r.config.betAmount === 'number' &&
+      r.round &&
+      r.scores &&
+      r.board &&
+      r.combos &&
+      r.flags
+  );
 }
 
 export function sanitizeNickname(raw: string): string {
@@ -220,4 +250,97 @@ export function validateHandPayload(
   if (!Array.isArray(payload.cards) || payload.cards.length > 8) return false;
   if (!payload.updatedAt) return false;
   return true;
+}
+
+export function getRoomErrorMessage(error: unknown, fallback: string): string {
+  const errorRecord =
+    typeof error === 'object' && error !== null
+      ? (error as { code?: unknown; message?: unknown })
+      : null;
+  let code = typeof errorRecord?.code === 'string' ? errorRecord.code : '';
+  let message =
+    typeof errorRecord?.message === 'string'
+      ? errorRecord.message
+      : typeof error === 'string'
+        ? error
+        : '';
+
+  let parsedOp = '';
+  let parsedPath = '';
+  let emailVerified: boolean | null = null;
+  let userId: string | null = null;
+  try {
+    const parsed = JSON.parse(message) as {
+      error?: unknown;
+      operationType?: unknown;
+      path?: unknown;
+      authInfo?: { emailVerified?: unknown; userId?: unknown };
+    };
+    if (typeof parsed.error === 'string') message = parsed.error;
+    if (typeof parsed.operationType === 'string') parsedOp = parsed.operationType;
+    if (typeof parsed.path === 'string') parsedPath = parsed.path;
+    if (typeof parsed.authInfo?.emailVerified === 'boolean') {
+      emailVerified = parsed.authInfo.emailVerified;
+    }
+    if (typeof parsed.authInfo?.userId === 'string') {
+      userId = parsed.authInfo.userId;
+    }
+  } catch {
+    // Firebase errors can also arrive as plain messages.
+  }
+
+  const codePrefixMatch = message.match(/^\[([a-z0-9/_-]+)\]\s*(.*)$/i);
+  if (codePrefixMatch) {
+    if (!code) code = codePrefixMatch[1];
+    message = codePrefixMatch[2];
+  }
+
+  const details = `${code} ${message}`.toLowerCase();
+  const displayCode =
+    code ||
+    (details.includes('permission-denied') || details.includes('missing or insufficient permissions')
+      ? 'permission-denied'
+      : details.includes('unauthenticated')
+        ? 'unauthenticated'
+        : details.includes('invalid-argument')
+          ? 'invalid-argument'
+          : '');
+  const codeSuffix = displayCode ? ` [${displayCode}]` : '';
+  const opTag = parsedOp && parsedPath ? ` (${parsedOp}: ${parsedPath})` : '';
+  const rawSnippet = message ? ` — ${message.slice(0, 140)}` : '';
+
+  if (details.includes('unauthenticated') || code.startsWith('auth/') || (!userId && parsedOp)) {
+    if (parsedOp && !userId) {
+      return `Нет активной авторизации Firebase Auth${opTag}${codeSuffix}. Войдите через Google и повторите попытку${rawSnippet}.`;
+    }
+    return `Ошибка авторизации${opTag}${codeSuffix}: войдите через Google заново${rawSnippet}.`;
+  }
+
+  if (details.includes('permission-denied') || details.includes('missing or insufficient permissions')) {
+    if (emailVerified === false) {
+      return `Аккаунт Google не подтверждён${opTag}${codeSuffix}. Подтвердите email и войдите снова${rawSnippet}.`;
+    }
+    if (parsedOp === 'create') {
+      return `Не удалось создать стол${opTag}${codeSuffix}. Запись отклонена правилами Firestore (или устарели опубликованные правила)${rawSnippet}.`;
+    }
+    if (parsedOp === 'delete') {
+      return `Не удалось удалить стол${opTag}${codeSuffix}. Убедитесь, что стол создали вы и игра ещё не началась${rawSnippet}.`;
+    }
+    if (parsedOp === 'list') {
+      return `Не удалось загрузить список столов${opTag}${codeSuffix}. Проверьте вход через Google и правила Firestore${rawSnippet}.`;
+    }
+    return `Нет доступа к столу${opTag}${codeSuffix}. Проверьте правила Firestore, авторизацию Google и что стол ещё открыт${rawSnippet}.`;
+  }
+
+  if (details.includes('invalid-argument') || details.includes('failed-precondition')) {
+    return `Ошибка структуры данных стола${opTag}${codeSuffix}${rawSnippet}.`;
+  }
+
+  if (details.includes('unavailable') || details.includes('offline') || details.includes('network')) {
+    return `Не удалось связаться с сервером${codeSuffix}. Проверьте интернет и попробуйте ещё раз${rawSnippet}.`;
+  }
+
+  return message && message.length < 220
+    ? `${displayCode ? `[${displayCode}] ` : ''}${message}`
+    : fallback;
 }

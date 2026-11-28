@@ -5,6 +5,7 @@ import {
   validateUserProfilePayload,
   validateHandPayload,
   isWaitingRoomActive,
+  getRoomErrorMessage,
   WAITING_ROOM_TTL_MS,
   ROOM_CODE_PATTERN,
 } from './src/utils/firestorePayloads';
@@ -24,12 +25,21 @@ test('Dirty Dozen security invariants & Firestore rule structure', () => {
   assert.ok(rulesText.includes("existing().status == 'waiting'\n            && request.auth.uid == existing().hostUid\n            && incoming().status == 'waiting'"));
   assert.ok(rulesText.includes("incoming().diff(existing()).affectedKeys().hasOnly([\n              'status', 'updatedAt'\n            ])"));
   assert.ok(rulesText.includes("allow delete: if isSignedIn() && isVerified() && isValidRoomCode(roomId)\n        && existing().status == 'waiting'\n        && existing().hostUid == request.auth.uid;"));
-  assert.ok(roomServiceText.includes("if (live.hostUid !== callerUid) return;\n        tx.delete(ref);"));
+  assert.ok(roomServiceText.includes("if (live.hostUid !== activeUid) return;\n        tx.delete(ref);"));
   assert.ok(rulesText.includes('isIncomingServerTime(getAfter(/databases/$(database)/documents/rooms/$(roomId)).data.updatedAt)'));
   assert.ok(rulesText.includes('isIncomingServerTime(incoming().createdAt)'));
   assert.ok(rulesText.includes('isIncomingServerTime(incoming().updatedAt)'));
   assert.ok(rulesText.includes('isRecentServerTime(existing().updatedAt)'));
+  assert.ok(rulesText.includes('function isTimestampOrServerTime(ts) {\n      return ts == request.time || ts is timestamp;\n    }'));
+  assert.ok(rulesText.includes('function isIncomingServerTime(ts) {\n      return ts == request.time\n        || ('));
   assert.ok(rulesText.includes("!incoming().diff(existing()).affectedKeys().hasAny(['createdAt'])"));
+  assert.ok(rulesText.includes('function isValidRoomConfig(cfg)'));
+  assert.ok(rulesText.includes('function isValidRoomRound(rnd)'));
+  assert.ok(rulesText.includes('function isValidRoomScores(sc)'));
+  assert.ok(rulesText.includes('function isValidRoomBoard(brd)'));
+  assert.ok(rulesText.includes('function isValidRoomCombos(cmb)'));
+  assert.ok(rulesText.includes('function isValidRoomFlags(flg)'));
+  assert.ok(rulesText.includes('incoming().config == existing().config'));
   assert.ok(!rulesText.includes('allow read: if isSignedIn();'));
 
   // 1 & 2: Valid user profile vs Cross-user / Ghost field injection
@@ -97,4 +107,59 @@ test('isWaitingRoomActive hides stale offline rooms and keeps active heartbeat r
     isWaitingRoomActive({ status: 'playing', updatedAt: now, createdAt: now }, now),
     false
   );
+});
+
+test('getRoomErrorMessage distinguishes create, delete, list, auth, and join permission errors with err.code', () => {
+  const createErr = new Error(
+    JSON.stringify({
+      error: '[permission-denied] Missing or insufficient permissions.',
+      operationType: 'create',
+      path: 'rooms/7W66E6',
+      authInfo: { userId: 'user_A', emailVerified: true },
+    })
+  );
+  const createMsg = getRoomErrorMessage(createErr, 'fallback');
+  assert.match(createMsg, /Не удалось создать стол/);
+  assert.match(createMsg, /\[permission-denied\]/);
+  assert.doesNotMatch(createMsg, /стол ещё открыт/);
+
+  const updateErr = new Error(
+    JSON.stringify({
+      error: 'Missing or insufficient permissions.',
+      operationType: 'update',
+      path: 'rooms/VVGK8S',
+      authInfo: { userId: 'user_A', emailVerified: true },
+    })
+  );
+  assert.match(getRoomErrorMessage(updateErr, 'fallback'), /стол ещё открыт/);
+
+  const deleteErr = new Error(
+    JSON.stringify({
+      error: 'Missing or insufficient permissions.',
+      operationType: 'delete',
+      path: 'rooms/V3GHJ4',
+      authInfo: { userId: 'user_A', emailVerified: true },
+    })
+  );
+  assert.match(getRoomErrorMessage(deleteErr, 'fallback'), /Не удалось удалить стол/);
+
+  const unverifiedErr = new Error(
+    JSON.stringify({
+      error: 'Missing or insufficient permissions.',
+      operationType: 'create',
+      path: 'rooms/ABC123',
+      authInfo: { userId: 'user_A', emailVerified: false },
+    })
+  );
+  assert.match(getRoomErrorMessage(unverifiedErr, 'fallback'), /Аккаунт Google не подтверждён/);
+
+  const unauthErr = new Error(
+    JSON.stringify({
+      error: '[permission-denied] Missing or insufficient permissions.',
+      operationType: 'create',
+      path: 'rooms/NOAUTH',
+      authInfo: { userId: null, emailVerified: null },
+    })
+  );
+  assert.match(getRoomErrorMessage(unauthErr, 'fallback'), /Нет активной авторизации Firebase Auth/);
 });
